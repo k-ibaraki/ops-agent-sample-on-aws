@@ -6,3 +6,13 @@ node_modules
 # CDK asset staging directory
 .cdk.staging
 cdk.out
+
+# デプロイパラメータ（parameter.sample.ts をコピーして作成する。個人環境の値を含むため除外）
+/parameter.ts
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
