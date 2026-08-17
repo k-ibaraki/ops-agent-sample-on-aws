@@ -62,6 +62,23 @@ def test_閾値以上の問題は詳細つきで強調される() -> None:
     assert "軽微な問題" in description
 
 
+def test_太字は行全体を包む形式でSlackでも崩れない() -> None:
+    # Slack の mrkdwn は *...* の外側に全角文字が隣接すると太字にならないため、
+    # 太字を使う行は「行全体が *...* で包まれている」ことを保証する
+    report = DailyReport(
+        overall_summary="1件の重要な問題を検出",
+        findings=[make_finding(85, "Lambda エラー率急増"), make_finding(30, "軽微な問題")],
+    )
+
+    notification = build_notification(report, threshold=50, generated_at=GENERATED_AT)
+    description = json.loads(notification.message)["content"]["description"]
+
+    for line in description.split("\n"):
+        if "*" in line:
+            assert line.startswith("*") and line.endswith("*"), line
+            assert "*" not in line[1:-1], line
+
+
 def test_件名は100文字以内で日付を含む() -> None:
     report = DailyReport(overall_summary="x" * 500, findings=[])
 

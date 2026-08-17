@@ -7,13 +7,23 @@ import uuid
 from typing import Any
 
 import boto3
+from botocore.config import Config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
 def _create_client() -> Any:
-    return boto3.client("bedrock-agentcore")
+    return boto3.client(
+        "bedrock-agentcore",
+        config=Config(
+            connect_timeout=10,
+            # エージェントの調査完了まで同期で待つ（Lambda タイムアウト 15 分より少し短く）
+            read_timeout=840,
+            # タイムアウト時のリトライはエージェントの多重実行（重複通知）になるため無効化
+            retries={"total_max_attempts": 1},
+        ),
+    )
 
 
 def handler(event: dict[str, Any] | None, context: Any) -> dict[str, Any]:

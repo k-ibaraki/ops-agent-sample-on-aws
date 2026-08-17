@@ -118,6 +118,8 @@ export class OpsAgentStack extends cdk.Stack {
       },
     });
     runtime.grantInvokeRuntime(invoker);
+    // リトライによるエージェントの多重実行（重複通知）を防ぐ
+    invoker.configureAsyncInvoke({ retryAttempts: 0 });
 
     // ---- 毎朝の定期実行 ----
     new scheduler.Schedule(this, "DailySchedule", {
@@ -126,7 +128,7 @@ export class OpsAgentStack extends cdk.Stack {
         scheduleCron,
         cdk.TimeZone.of(scheduleTimeZone),
       ),
-      target: new schedulerTargets.LambdaInvoke(invoker),
+      target: new schedulerTargets.LambdaInvoke(invoker, { retryAttempts: 0 }),
     });
 
     // ---- Slack 連携（任意） ----

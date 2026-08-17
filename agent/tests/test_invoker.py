@@ -21,6 +21,21 @@ class FakeAgentCoreClient:
         }
 
 
+def test_クライアントは長時間実行を待てるリトライなし設定になっている(monkeypatch: Any) -> None:
+    # ローカルの AWS 設定に依存しないよう、ダミーの認証情報で隔離する
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-northeast-1")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_CONFIG_FILE", "/dev/null")
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    client = invoker._create_client()
+
+    config = client.meta.config
+    assert config.read_timeout == 840
+    assert config.retries["total_max_attempts"] == 1
+
+
 def test_handlerはAgentCoreRuntimeを呼び出して結果を返す(monkeypatch: Any) -> None:
     client = FakeAgentCoreClient()
     monkeypatch.setenv(

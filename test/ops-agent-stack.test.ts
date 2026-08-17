@@ -87,6 +87,18 @@ describe("OpsAgentStack", () => {
     );
   });
 
+  test("リトライによる多重実行が無効化されている", () => {
+    // Lambda の非同期リトライと Scheduler のリトライの両方を止める
+    template.hasResourceProperties("AWS::Lambda::EventInvokeConfig", {
+      MaximumRetryAttempts: 0,
+    });
+    template.hasResourceProperties("AWS::Scheduler::Schedule", {
+      Target: Match.objectLike({
+        RetryPolicy: Match.objectLike({ MaximumRetryAttempts: 0 }),
+      }),
+    });
+  });
+
   test("毎朝 8:00 JST のスケジュールが作成される", () => {
     template.hasResourceProperties("AWS::Scheduler::Schedule", {
       ScheduleExpression: "cron(0 8 * * ? *)",

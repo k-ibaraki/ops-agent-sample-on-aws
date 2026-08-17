@@ -26,11 +26,13 @@ class Notification:
 
 
 def _format_notable(finding: Finding) -> str:
+    # Slack の mrkdwn は太字 *...* の隣に全角文字が来ると崩れるため、太字は必ず行全体を包む
     return (
-        f"*{finding.title}*（スコア {finding.score} / {finding.region}）\n"
-        f"- 対象: `{finding.resource}`\n"
-        f"- 状況: {finding.summary}\n"
-        f"- 推奨: {finding.recommendation}"
+        f"*{finding.title}*\n"
+        f"スコア: {finding.score}（{finding.region}）\n"
+        f"• 対象: `{finding.resource}`\n"
+        f"• 状況: {finding.summary}\n"
+        f"• 推奨: {finding.recommendation}"
     )
 
 
@@ -51,11 +53,11 @@ def build_notification(
 
     sections = [report.overall_summary]
     if notable:
-        sections.append(f"--- スコア {threshold} 点以上の問題 ---")
+        sections.append(f"*スコア {threshold} 点以上の問題*")
         sections.extend(_format_notable(f) for f in notable)
     if minor:
-        lines = "\n".join(f"- {f.title}（スコア {f.score} / {f.region}）" for f in minor)
-        sections.append(f"--- その他の検出事項（{threshold} 点未満）---\n{lines}")
+        lines = "\n".join(f"• {f.title}（スコア {f.score} / {f.region}）" for f in minor)
+        sections.append(f"*その他の検出事項（{threshold} 点未満）*\n{lines}")
 
     description = "\n\n".join(sections)
     if len(description) > MAX_DESCRIPTION_CHARS:
