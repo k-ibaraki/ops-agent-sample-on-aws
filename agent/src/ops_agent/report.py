@@ -26,13 +26,16 @@ class Notification:
 
 
 def _format_notable(finding: Finding) -> str:
-    # Slack の mrkdwn は太字 *...* の隣に全角文字が来ると崩れるため、太字は必ず行全体を包む
+    # Slack の mrkdwn は太字 *...* の隣に全角文字が来ると崩れるため、太字は必ず行全体を包む。
+    # 状況・推奨は複数行の本文が入る前提で、ラベル行 + 本文の段落に分ける
     return (
         f"*{finding.title}*\n"
         f"スコア: {finding.score}（{finding.region}）\n"
-        f"• 対象: `{finding.resource}`\n"
-        f"• 状況: {finding.summary}\n"
-        f"• 推奨: {finding.recommendation}"
+        f"対象: `{finding.resource}`\n"
+        f"\n"
+        f"状況:\n{finding.summary}\n"
+        f"\n"
+        f"推奨:\n{finding.recommendation}"
     )
 
 

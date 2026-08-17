@@ -60,6 +60,9 @@ def test_閾値以上の問題は詳細つきで強調される() -> None:
     assert "直近のデプロイをロールバックする" in description
     # 閾値未満の問題はタイトル一覧に載るが詳細は展開されない
     assert "軽微な問題" in description
+    # 状況・推奨はラベル行 + 本文行に分かれ、段落として余白が入る
+    assert "\n\n状況:\n" in description
+    assert "\n\n推奨:\n" in description
 
 
 def test_太字は行全体を包む形式でSlackでも崩れない() -> None:

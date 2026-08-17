@@ -6,7 +6,7 @@ LLM 呼び出し（strands の Agent）はフェイクに差し替える。
 import json
 from typing import Any
 
-from ops_agent.agent import build_system_prompt, run_daily_check
+from ops_agent.agent import SKILLS_DIR, build_system_prompt, run_daily_check
 from ops_agent.config import Config
 from ops_agent.models import DailyReport, Finding
 
@@ -66,6 +66,15 @@ def test_システムプロンプトに採点基準が含まれる() -> None:
     assert "継続性" in prompt
 
 
+def test_書式スキルの定義が存在する() -> None:
+    skill_md = SKILLS_DIR / "slack-report-style" / "SKILL.md"
+
+    assert skill_md.is_file()
+    content = skill_md.read_text(encoding="utf-8")
+    assert "name: slack-report-style" in content
+    assert "description:" in content
+
+
 def test_run_daily_checkは調査から通知までを実行する() -> None:
     agent = FakeAgent()
     sns = FakeSns()
@@ -77,8 +86,9 @@ def test_run_daily_checkは調査から通知までを実行する() -> None:
     assert "ap-northeast-1" in agent.prompts[0]
     assert "us-east-1" in agent.prompts[0]
     assert "24" in agent.prompts[0]
-    # 構造化出力で DailyReport を要求している
+    # 構造化出力で DailyReport を要求し、書式スキルの参照を指示している
     assert agent.structured_output_calls[0][0] is DailyReport
+    assert "slack-report-style" in agent.structured_output_calls[0][1]
     # 通知が1回発行され、検出内容が含まれる
     assert sns.publish_kwargs["TopicArn"] == CONFIG.sns_topic_arn
     message = json.loads(sns.publish_kwargs["Message"])

@@ -5,10 +5,11 @@
 """
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Protocol
 
 import boto3
-from strands import Agent
+from strands import Agent, AgentSkills
 from strands.models import BedrockModel
 
 from ops_agent.aws_tools import build_tools
@@ -16,6 +17,9 @@ from ops_agent.config import Config
 from ops_agent.models import DailyReport
 from ops_agent.notifier import publish_notification
 from ops_agent.report import build_notification
+
+# レポート文面の書式ルールを Strands の Skills 機能で渡す
+SKILLS_DIR = Path(__file__).parent / "skills"
 
 
 class InvestigatorAgent(Protocol):
@@ -65,11 +69,12 @@ def build_investigation_prompt(config: Config) -> str:
 
 
 def build_agent(config: Config) -> Agent:
-    """CloudWatch 調査ツールを持つ Strands エージェントを組み立てる。"""
+    """CloudWatch 調査ツールと書式スキルを持つ Strands エージェントを組み立てる。"""
     return Agent(
         model=BedrockModel(model_id=config.model_id),
         system_prompt=build_system_prompt(config),
         tools=build_tools(config),
+        plugins=[AgentSkills(skills=str(SKILLS_DIR / "slack-report-style"))],
     )
 
 
@@ -89,7 +94,8 @@ def run_daily_check(
     report = agent.structured_output(
         DailyReport,
         "ここまでの調査結果を DailyReport にまとめてください。"
-        "問題ごとに採点基準に沿ったスコアを付けてください。",
+        "問題ごとに採点基準に沿ったスコアを付けてください。"
+        "文面は slack-report-style スキルを読み込み、その書式ルールに従って書いてください。",
     )
 
     notification = build_notification(
