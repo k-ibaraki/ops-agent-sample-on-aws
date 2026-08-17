@@ -1,6 +1,9 @@
 {
   "name": "ops-agent-sample-on-aws",
   "version": "0.1.0",
+  "engines": {
+    "node": "^24.0.0"
+  },
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
