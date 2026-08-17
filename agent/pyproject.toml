@@ -1,0 +1,35 @@
+[project]
+name = "ops-agent"
+version = "0.1.0"
+description = "過去24時間の CloudWatch を自律調査して Slack に通知する運用エージェント"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "bedrock-agentcore>=1.21.0",
+    "boto3>=1.43.72",
+    "pydantic>=2",
+    "strands-agents>=1.52.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.3",
+    "ty>=0.0.72",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+# 日本語の全角記号を誤検知するため無効化
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "../invoker"]
+
+[tool.ty.environment]
+extra-paths = ["../invoker"]
