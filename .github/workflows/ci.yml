@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    name: Python (agent / invoker)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: agent/uv.lock
+      - name: 依存関係のインストール
+        run: uv sync --frozen
+      - name: フォーマットチェック (ruff format)
+        run: uv run ruff format --check .
+      - name: Lint (ruff check)
+        run: uv run ruff check .
+      - name: 型チェック (ty)
+        run: uv run ty check
+      - name: テスト (pytest)
+        run: uv run pytest
+
+  cdk:
+    name: CDK (TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: 依存関係のインストール
+        run: pnpm install --frozen-lockfile
+      - name: パラメータファイルの用意（parameter.ts は gitignore のためサンプルから生成）
+        run: cp parameter.sample.ts parameter.ts
+      - name: 型チェック (tsc)
+        run: pnpm build
+      - name: テスト (jest)
+        run: pnpm test
+      - name: synth 確認
+        run: pnpm cdk synth --quiet
