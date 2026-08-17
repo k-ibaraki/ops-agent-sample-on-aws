@@ -61,8 +61,34 @@ def test_閾値以上の問題は詳細つきで強調される() -> None:
     # 閾値未満の問題はタイトル一覧に載るが詳細は展開されない
     assert "軽微な問題" in description
     # 状況・推奨はラベル行 + 本文行に分かれ、段落として余白が入る
-    assert "\n\n状況:\n" in description
-    assert "\n\n推奨:\n" in description
+    assert "\n\n📊 状況:\n" in description
+    assert "\n\n💡 推奨:\n" in description
+
+
+def test_スコアに応じた深刻度の絵文字が付く() -> None:
+    report = DailyReport(
+        overall_summary="概況",
+        findings=[
+            make_finding(95, "重大障害"),
+            make_finding(85, "早急対応"),
+            make_finding(55, "要注意"),
+            make_finding(30, "軽微"),
+            make_finding(10, "情報"),
+        ],
+    )
+
+    notification = build_notification(report, threshold=50, generated_at=GENERATED_AT)
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert "*🔴 重大障害*" in description
+    assert "*🟠 早急対応*" in description
+    assert "*🟡 要注意*" in description
+    # 閾値未満は一覧行に絵文字付きで並ぶ
+    assert "🔵 軽微（スコア 30 / ap-northeast-1）" in description
+    assert "⚪ 情報（スコア 10 / ap-northeast-1）" in description
+    # セクション見出しにも絵文字が付く
+    assert "*⚠️ スコア 50 点以上の問題*" in description
+    assert "*📋 その他の検出事項（50 点未満）*" in description
 
 
 def test_太字は行全体を包む形式でSlackでも崩れない() -> None:

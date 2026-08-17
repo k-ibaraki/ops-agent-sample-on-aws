@@ -25,17 +25,30 @@ class Notification:
     message: str
 
 
+def _severity_emoji(score: int) -> str:
+    """スコア帯（システムプロンプトの採点基準と対応）を絵文字で表す。"""
+    if score >= 90:
+        return "🔴"
+    if score >= 70:
+        return "🟠"
+    if score >= 50:
+        return "🟡"
+    if score >= 25:
+        return "🔵"
+    return "⚪"
+
+
 def _format_notable(finding: Finding) -> str:
     # Slack の mrkdwn は太字 *...* の隣に全角文字が来ると崩れるため、太字は必ず行全体を包む。
     # 状況・推奨は複数行の本文が入る前提で、ラベル行 + 本文の段落に分ける
     return (
-        f"*{finding.title}*\n"
+        f"*{_severity_emoji(finding.score)} {finding.title}*\n"
         f"スコア: {finding.score}（{finding.region}）\n"
-        f"対象: `{finding.resource}`\n"
+        f"🎯 対象: `{finding.resource}`\n"
         f"\n"
-        f"状況:\n{finding.summary}\n"
+        f"📊 状況:\n{finding.summary}\n"
         f"\n"
-        f"推奨:\n{finding.recommendation}"
+        f"💡 推奨:\n{finding.recommendation}"
     )
 
 
@@ -56,11 +69,13 @@ def build_notification(
 
     sections = [report.overall_summary]
     if notable:
-        sections.append(f"*スコア {threshold} 点以上の問題*")
+        sections.append(f"*⚠️ スコア {threshold} 点以上の問題*")
         sections.extend(_format_notable(f) for f in notable)
     if minor:
-        lines = "\n".join(f"• {f.title}（スコア {f.score} / {f.region}）" for f in minor)
-        sections.append(f"*その他の検出事項（{threshold} 点未満）*\n{lines}")
+        lines = "\n".join(
+            f"{_severity_emoji(f.score)} {f.title}（スコア {f.score} / {f.region}）" for f in minor
+        )
+        sections.append(f"*📋 その他の検出事項（{threshold} 点未満）*\n{lines}")
 
     description = "\n\n".join(sections)
     if len(description) > MAX_DESCRIPTION_CHARS:
