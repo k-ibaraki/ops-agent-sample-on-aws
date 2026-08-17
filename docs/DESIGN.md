@@ -9,6 +9,10 @@
 過去 24 時間の CloudWatch（アラーム・ログ・メトリクス）を自律調査して、
 見つけた問題に 0〜100 点のスコアを付け、結果を SNS 経由で Slack に通知します。
 
+![AWS 構成図](architecture.drawio.png)
+
+（構成図は draw.io の XML を埋め込んだ PNG です。draw.io で開くとそのまま編集できます）
+
 ```
 EventBridge Scheduler (毎朝 8:00 JST)
   → 中継 Lambda (Python)

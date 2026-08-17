@@ -6,14 +6,7 @@ AWS アカウントの日次ヘルスチェックを行う運用エージェン�
 
 ## アーキテクチャ
 
-```mermaid
-flowchart LR
-    A[EventBridge Scheduler<br>毎朝 8:00 JST] --> B[中継 Lambda<br>Python]
-    B -->|InvokeAgentRuntime| C[AgentCore Runtime<br>Strands Agents]
-    C -->|読み取り専用ツール| D[CloudWatch<br>アラーム / ログ / メトリクス]
-    C -->|採点結果を Publish| E[SNS トピック]
-    E --> F[Amazon Q Developer<br>in chat applications] --> G[Slack]
-```
+![AWS 構成図](docs/architecture.drawio.png)
 
 - エージェントには CloudWatch の調査ツール（boto3 の薄いラッパー、読み取り専用）だけを渡し、どこをどう深掘りするかはエージェント自身が判断します
 - 採点結果は Pydantic モデルの構造化出力で受け取り、通知メッセージの整形と SNS 発行は LLM を介さない通常のコードで行います
