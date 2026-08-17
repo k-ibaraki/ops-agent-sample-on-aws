@@ -1,0 +1,51 @@
+# 実装記録（Implementation Log）
+
+実装時の作業内容とつまずきの記録です。設計決定そのものは [DESIGN.md](DESIGN.md) を参照してください。
+
+## 2026-08-17: 初期実装
+
+### 進め方
+
+テスト駆動開発（TDD）で、レッド（テスト先行で失敗を確認）→ グリーン（実装してテストを通す）の順に進めた。
+
+1. 設計決定録（DESIGN.md）を作成
+2. `agent/` を uv で scaffold（Python 3.14 / ruff / ty / pytest）
+3. エージェント本体をテスト先行で実装
+   - `config.py`: 環境変数からの設定読み込み
+   - `models.py`: 採点結果の Pydantic スキーマ（構造化出力用）
+   - `aws_tools.py`: CloudWatch 調査ツール 5 種（読み取り専用、リージョン許可リスト検証つき）
+   - `report.py`: カスタム通知形式（Amazon Q Developer in chat apps）への整形
+   - `notifier.py`: SNS 発行
+   - `agent.py`: 調査 → 構造化出力 → 通知のオーケストレーション
+   - `main.py`: BedrockAgentCoreApp のエントリポイント
+4. 中継 Lambda（`invoker/handler.py`）をテスト先行で実装
+5. CDK スタックを jest の Template アサーション先行で実装
+6. CI（GitHub Actions）・README を整備
+
+### 実装上の判断・つまずき
+
+- Python バージョン: 当初 3.13 で始めたが、CDK の `lambda.Runtime.PYTHON_3_14` 対応を確認できたため、venv / Docker / Lambda / CI とも 3.14 に統一した
+- ruff の RUF001/RUF002/RUF003 は日本語の全角記号（（）や 〜 など）を誤検知するため、無効化した
+- ty が `invoker/` のモジュールを解決できなかったため、`[tool.ty.environment] extra-paths` に `../invoker` を追加した
+- boto3 クライアントはテストでフェイクを注入できるよう、各ツール関数に `client_factory` 引数を持たせた（moto などの追加依存を避けるため）
+- AgentCore Runtime の L2 construct が自動生成する実行ロールには、Runtime 自身の実行ログ書き込み権限（`/aws/bedrock-agentcore/runtimes/*` にスコープ済み）が含まれる。当初「`logs:PutLogEvents` が存在しないこと」を最小権限のテストとしていたが誤検知だったため、「自分で付与した読み取り専用ステートメントの中身が正しいこと」を検証する形に修正した
+- Strands のツールは `@tool(name=...)` を付けた closure として `build_tools()` で生成し、設定（Config）を束縛した。ロジック本体は素の関数として公開し、単体テストは素の関数側に対して行う構成にした
+- CDK のディレクトリは `lib/`（cdk init のデフォルト）から `stacks/` にリネームした
+
+### 検証結果
+
+- Python: pytest 23 件パス / ruff・ty クリーン
+- CDK: jest 10 件パス / `cdk synth` 成功
+- Docker イメージのビルドとデプロイは未実施（デプロイ時に検証する）
+
+## 2026-08-17: パラメータを parameter.ts に集約
+
+当初は CDK context（`-c` オプション）でパラメータを渡す設計だったが、
+設定をファイルで管理したいという要望を受けて、リポジトリ直下の型付き `parameter.ts` に集約した。
+
+- `OpsAgentParameters` インターフェースをスタック側で定義し、スタックには props として渡す
+- context 参照（`node.tryGetContext`）は廃止。設定の入口が 1 箇所になり、型チェックも効く
+- テストも context 経由ではなく `Partial<OpsAgentParameters>` の上書きで書けるようになり、シンプルになった
+- `.env.example` 方式を採用: `parameter.sample.ts` をコミットし、実際の `parameter.ts` は gitignore。
+  個人環境の値（Slack の ID など）の誤コミットを防ぐ。テストは `parameter.sample.ts` を参照し、
+  CI では `cp parameter.sample.ts parameter.ts` を挟んで build / synth を通す
