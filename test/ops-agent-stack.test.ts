@@ -2,13 +2,13 @@ import * as cdk from "aws-cdk-lib/core";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { parameters } from "../parameter.sample";
 import {
-  OpsAgentStack,
+  createOpsAgentStack,
   type OpsAgentParameters,
 } from "../stacks/ops-agent-stack";
 
 function synth(overrides: Partial<OpsAgentParameters> = {}): Template {
   const app = new cdk.App();
-  const stack = new OpsAgentStack(app, "TestStack", {
+  const stack = createOpsAgentStack(app, "TestStack", {
     parameters: { ...parameters, ...overrides },
   });
   return Template.fromStack(stack);

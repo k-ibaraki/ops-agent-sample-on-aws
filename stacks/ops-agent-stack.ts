@@ -35,113 +35,118 @@ export interface OpsAgentStackProps extends cdk.StackProps {
 }
 
 /**
- * 過去24時間の CloudWatch を自律調査して Slack に通知する運用エージェントのスタック。
+ * 過去24時間の CloudWatch を自律調査して Slack に通知する運用エージェントのスタックを組み立てる。
  *
  * 構成: EventBridge Scheduler → 中継 Lambda → AgentCore Runtime (Strands Agents)
  *       → SNS → Amazon Q Developer in chat applications (旧 AWS Chatbot) → Slack
  */
-export class OpsAgentStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props: OpsAgentStackProps) {
-    super(scope, id, props);
+export function createOpsAgentStack(
+  scope: Construct,
+  id: string,
+  props: OpsAgentStackProps,
+): cdk.Stack {
+  const { parameters, ...stackProps } = props;
+  const {
+    scheduleCron,
+    scheduleTimeZone,
+    modelId,
+    scoreThreshold,
+    lookbackHours,
+    targetRegions,
+    slackWorkspaceId,
+    slackChannelId,
+  } = parameters;
 
-    const {
+  const stack = new cdk.Stack(scope, id, stackProps);
+
+  // ---- 通知先の SNS トピック ----
+  const topic = new sns.Topic(stack, "NotificationTopic", {
+    displayName: "ops-agent 日次ヘルスチェック通知",
+  });
+
+  // ---- エージェント本体 (AgentCore Runtime) ----
+  const runtime = new agentcore.Runtime(stack, "AgentRuntime", {
+    description: "CloudWatch を日次チェックする運用エージェント",
+    agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset(
+      path.join(__dirname, "..", "agent"),
+      { platform: ecrAssets.Platform.LINUX_ARM64 },
+    ),
+    environmentVariables: {
+      SNS_TOPIC_ARN: topic.topicArn,
+      MODEL_ID: modelId,
+      SCORE_THRESHOLD: String(scoreThreshold),
+      LOOKBACK_HOURS: String(lookbackHours),
+      // コンテナ側の AWS_REGION に暗黙依存しないよう、未指定でも明示的に設定する
+      TARGET_REGIONS:
+        targetRegions.length > 0 ? targetRegions.join(",") : cdk.Aws.REGION,
+    },
+  });
+
+  // CloudWatch の読み取りに必要な最小権限（調査ツールが使う API のみ）
+  runtime.grant(
+    [
+      "cloudwatch:DescribeAlarms",
+      "cloudwatch:DescribeAlarmHistory",
+      "cloudwatch:GetMetricStatistics",
+      "logs:DescribeLogGroups",
+      "logs:StartQuery",
+      "logs:GetQueryResults",
+      "logs:StopQuery",
+    ],
+    ["*"],
+  );
+  // Bedrock モデル呼び出し（クロスリージョン推論プロファイル経由）
+  runtime.grant(
+    ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+    [
+      `arn:${cdk.Aws.PARTITION}:bedrock:*::foundation-model/*`,
+      `arn:${cdk.Aws.PARTITION}:bedrock:*:${cdk.Aws.ACCOUNT_ID}:inference-profile/*`,
+    ],
+  );
+  topic.grantPublish(runtime);
+
+  // ---- 中継 Lambda（Scheduler から起動され Runtime を同期呼び出しする） ----
+  const invoker = new lambda.Function(stack, "InvokerFunction", {
+    description: "EventBridge Scheduler から AgentCore Runtime を起動する中継 Lambda",
+    runtime: lambda.Runtime.PYTHON_3_14,
+    architecture: lambda.Architecture.ARM_64,
+    handler: "handler.handler",
+    code: lambda.Code.fromAsset(path.join(__dirname, "..", "invoker"), {
+      exclude: ["__pycache__", "*.pyc"],
+    }),
+    // エージェントの調査完了まで同期で待つため、Lambda の上限いっぱいに設定
+    timeout: cdk.Duration.minutes(15),
+    memorySize: 256,
+    environment: {
+      AGENT_RUNTIME_ARN: runtime.agentRuntimeArn,
+    },
+  });
+  runtime.grantInvokeRuntime(invoker);
+  // リトライによるエージェントの多重実行（重複通知）を防ぐ
+  invoker.configureAsyncInvoke({ retryAttempts: 0 });
+
+  // ---- 毎朝の定期実行 ----
+  new scheduler.Schedule(stack, "DailySchedule", {
+    description: "運用エージェントの日次実行",
+    schedule: scheduler.ScheduleExpression.expression(
       scheduleCron,
-      scheduleTimeZone,
-      modelId,
-      scoreThreshold,
-      lookbackHours,
-      targetRegions,
+      cdk.TimeZone.of(scheduleTimeZone),
+    ),
+    target: new schedulerTargets.LambdaInvoke(invoker, { retryAttempts: 0 }),
+  });
+
+  // ---- Slack 連携（任意） ----
+  if (slackWorkspaceId && slackChannelId) {
+    new chatbot.SlackChannelConfiguration(stack, "SlackNotification", {
+      slackChannelConfigurationName: `${stack.stackName}-notifications`,
       slackWorkspaceId,
       slackChannelId,
-    } = props.parameters;
-
-    // ---- 通知先の SNS トピック ----
-    const topic = new sns.Topic(this, "NotificationTopic", {
-      displayName: "ops-agent 日次ヘルスチェック通知",
+      notificationTopics: [topic],
     });
-
-    // ---- エージェント本体 (AgentCore Runtime) ----
-    const runtime = new agentcore.Runtime(this, "AgentRuntime", {
-      description: "CloudWatch を日次チェックする運用エージェント",
-      agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset(
-        path.join(__dirname, "..", "agent"),
-        { platform: ecrAssets.Platform.LINUX_ARM64 },
-      ),
-      environmentVariables: {
-        SNS_TOPIC_ARN: topic.topicArn,
-        MODEL_ID: modelId,
-        SCORE_THRESHOLD: String(scoreThreshold),
-        LOOKBACK_HOURS: String(lookbackHours),
-        // コンテナ側の AWS_REGION に暗黙依存しないよう、未指定でも明示的に設定する
-        TARGET_REGIONS:
-          targetRegions.length > 0 ? targetRegions.join(",") : cdk.Aws.REGION,
-      },
-    });
-
-    // CloudWatch の読み取りに必要な最小権限（調査ツールが使う API のみ）
-    runtime.grant(
-      [
-        "cloudwatch:DescribeAlarms",
-        "cloudwatch:DescribeAlarmHistory",
-        "cloudwatch:GetMetricStatistics",
-        "logs:DescribeLogGroups",
-        "logs:StartQuery",
-        "logs:GetQueryResults",
-        "logs:StopQuery",
-      ],
-      ["*"],
-    );
-    // Bedrock モデル呼び出し（クロスリージョン推論プロファイル経由）
-    runtime.grant(
-      ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-      [
-        `arn:${cdk.Aws.PARTITION}:bedrock:*::foundation-model/*`,
-        `arn:${cdk.Aws.PARTITION}:bedrock:*:${cdk.Aws.ACCOUNT_ID}:inference-profile/*`,
-      ],
-    );
-    topic.grantPublish(runtime);
-
-    // ---- 中継 Lambda（Scheduler から起動され Runtime を同期呼び出しする） ----
-    const invoker = new lambda.Function(this, "InvokerFunction", {
-      description: "EventBridge Scheduler から AgentCore Runtime を起動する中継 Lambda",
-      runtime: lambda.Runtime.PYTHON_3_14,
-      architecture: lambda.Architecture.ARM_64,
-      handler: "handler.handler",
-      code: lambda.Code.fromAsset(path.join(__dirname, "..", "invoker"), {
-        exclude: ["__pycache__", "*.pyc"],
-      }),
-      // エージェントの調査完了まで同期で待つため、Lambda の上限いっぱいに設定
-      timeout: cdk.Duration.minutes(15),
-      memorySize: 256,
-      environment: {
-        AGENT_RUNTIME_ARN: runtime.agentRuntimeArn,
-      },
-    });
-    runtime.grantInvokeRuntime(invoker);
-    // リトライによるエージェントの多重実行（重複通知）を防ぐ
-    invoker.configureAsyncInvoke({ retryAttempts: 0 });
-
-    // ---- 毎朝の定期実行 ----
-    new scheduler.Schedule(this, "DailySchedule", {
-      description: "運用エージェントの日次実行",
-      schedule: scheduler.ScheduleExpression.expression(
-        scheduleCron,
-        cdk.TimeZone.of(scheduleTimeZone),
-      ),
-      target: new schedulerTargets.LambdaInvoke(invoker, { retryAttempts: 0 }),
-    });
-
-    // ---- Slack 連携（任意） ----
-    if (slackWorkspaceId && slackChannelId) {
-      new chatbot.SlackChannelConfiguration(this, "SlackNotification", {
-        slackChannelConfigurationName: `${this.stackName}-notifications`,
-        slackWorkspaceId,
-        slackChannelId,
-        notificationTopics: [topic],
-      });
-    }
-
-    new cdk.CfnOutput(this, "NotificationTopicArn", { value: topic.topicArn });
-    new cdk.CfnOutput(this, "AgentRuntimeArn", { value: runtime.agentRuntimeArn });
   }
+
+  new cdk.CfnOutput(stack, "NotificationTopicArn", { value: topic.topicArn });
+  new cdk.CfnOutput(stack, "AgentRuntimeArn", { value: runtime.agentRuntimeArn });
+
+  return stack;
 }
