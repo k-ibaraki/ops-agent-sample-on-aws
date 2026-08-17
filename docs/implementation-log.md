@@ -60,3 +60,26 @@
   `--cli-binary-format raw-in-base64-out` を追加
 - `query_logs` のタイムアウト経路（`stop_query` 呼び出し）のテストを追加
 - ログ本文経由のプロンプトインジェクションに関する注意書きと設計上の緩和策を README に追記
+
+## 2026-08-17: 初回デプロイでの検証と修正
+
+東京リージョンへ実際にデプロイして動作確認を行い、ユニットテストでは検出できない問題を 3 つ見つけて修正した。
+
+1. コンテナ起動失敗（`ModuleNotFoundError: No module named 'ops_agent'`）:
+   `pyproject.toml` に `[build-system]` が無く、uv がプロジェクト自身をパッケージとして
+   インストールしていなかった。ローカルの pytest は `pythonpath = ["src"]` 設定で
+   動いていたため気づけなかった。`uv_build` バックエンドを追加して解決。
+   あわせて `.dockerignore` の README.md 除外がビルド失敗（`readme` 参照）を起こすため解除
+2. エージェントの多重実行（重複通知）: 中継 Lambda の boto3 クライアントの
+   read timeout がデフォルト 60 秒で、エージェントの調査時間（2〜3 分）より短く、
+   botocore の自動リトライで同じ日次チェックが 3 回実行された。
+   `read_timeout=840` + リトライ無効化（`total_max_attempts: 1`）で解決。
+   Lambda の非同期リトライ（`configureAsyncInvoke`）と Scheduler のリトライも 0 に設定
+3. Slack 表示の崩れ: Slack の mrkdwn は太字 `*...*` の外側に全角文字（`（` など）が
+   隣接すると太字にならない。太字を使う行は「行全体を `*...*` で包む」レイアウトに変更し、
+   これを保証するテストを追加
+
+検証結果: 手動実行 1 回で調査 → 採点 → Slack 通知まで完走（約 2 分 20 秒・実行回数 1 回）。
+
+教訓: Docker イメージのビルドとコンテナ内での import 確認は、デプロイ前にローカルの
+`docker build` + `docker run` でスモークテストしておくと手戻りが少ない。
