@@ -108,6 +108,17 @@ def test_太字は行全体を包む形式でSlackでも崩れない() -> None:
             assert "*" not in line[1:-1], line
 
 
+def test_日付はJSTで解釈される() -> None:
+    # UTC の 8/16 23:30 は JST では 8/17
+    generated_at = datetime(2026, 8, 16, 23, 30, tzinfo=UTC)
+    report = DailyReport(overall_summary="概況", findings=[])
+
+    notification = build_notification(report, threshold=50, generated_at=generated_at)
+
+    assert "2026-08-17" in notification.subject
+    assert "2026-08-17" in json.loads(notification.message)["content"]["title"]
+
+
 def test_件名は100文字以内で日付を含む() -> None:
     report = DailyReport(overall_summary="x" * 500, findings=[])
 

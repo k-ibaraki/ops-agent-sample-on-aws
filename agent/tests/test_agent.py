@@ -66,6 +66,14 @@ def test_システムプロンプトに採点基準が含まれる() -> None:
     assert "継続性" in prompt
 
 
+def test_システムプロンプトに時刻の扱いが定義されている() -> None:
+    prompt = build_system_prompt(CONFIG)
+
+    # 思考（ツールのデータ）は UTC、報告は JST という分担を明記する
+    assert "UTC" in prompt
+    assert "JST" in prompt
+
+
 def test_書式スキルの定義が存在する() -> None:
     skill_md = SKILLS_DIR / "slack-report-style" / "SKILL.md"
 
@@ -73,6 +81,8 @@ def test_書式スキルの定義が存在する() -> None:
     content = skill_md.read_text(encoding="utf-8")
     assert "name: slack-report-style" in content
     assert "description:" in content
+    # 報告文中の時刻は JST で書くルールが定義されている
+    assert "JST" in content
 
 
 def test_run_daily_checkは調査から通知までを実行する() -> None:
