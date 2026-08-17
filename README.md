@@ -97,6 +97,7 @@ ID を設定しない場合は SNS トピックまで作成されるので、メ
 ```sh
 aws lambda invoke \
   --function-name <InvokerFunction の関数名> \
+  --cli-binary-format raw-in-base64-out \
   --payload '{}' /dev/stdout
 ```
 
@@ -116,6 +117,11 @@ pnpm build                # 型チェック
 pnpm test                 # jest（Template アサーション）
 pnpm cdk synth --quiet    # synth 確認
 ```
+
+## セキュリティに関する注意
+
+- エージェントはログ本文という信頼できない入力を読むため、理論上はログに仕込まれた指示文によるプロンプトインジェクションがあり得ます。このサンプルでは、エージェントに読み取り専用ツールだけを渡し、通知の整形・送信を LLM を介さないコードで行うことで、実害につながる経路を塞いでいます
+- ツールの追加などで拡張する場合も、書き込み系の権限をエージェントに与えない方針を維持することをおすすめします
 
 ## コストに関する注意
 

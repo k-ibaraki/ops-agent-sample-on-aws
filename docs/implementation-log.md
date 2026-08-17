@@ -49,3 +49,14 @@
 - `.env.example` 方式を採用: `parameter.sample.ts` をコミットし、実際の `parameter.ts` は gitignore。
   個人環境の値（Slack の ID など）の誤コミットを防ぐ。テストは `parameter.sample.ts` を参照し、
   CI では `cp parameter.sample.ts parameter.ts` を挟んで build / synth を通す
+
+## 2026-08-17: セルフレビューでの修正
+
+5観点（コード品質・テスト・セキュリティ・ドキュメント・規約）のセルフレビューを実施し、以下を修正した。
+
+- `TARGET_REGIONS` 未指定時にコンテナの `AWS_REGION` 環境変数へ暗黙依存していたため、
+  CDK 側で常に明示的に設定する形に変更（未指定ならデプロイ先リージョン）
+- README の `aws lambda invoke` 例が AWS CLI v2 で失敗するため
+  `--cli-binary-format raw-in-base64-out` を追加
+- `query_logs` のタイムアウト経路（`stop_query` 呼び出し）のテストを追加
+- ログ本文経由のプロンプトインジェクションに関する注意書きと設計上の緩和策を README に追記

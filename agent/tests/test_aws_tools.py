@@ -160,6 +160,37 @@ def test_query_logsはLogsInsightsの結果を返す() -> None:
     assert logs.start_query_kwargs["logGroupNames"] == ["/aws/lambda/my-func"]
 
 
+def test_query_logsはタイムアウト時にクエリを停止してエラーを返す() -> None:
+    class FakeLogsNeverDone(FakeLogs):
+        def __init__(self) -> None:
+            super().__init__()
+            self.stopped: list[str] = []
+
+        def get_query_results(self, queryId: str) -> dict[str, Any]:
+            return {"status": "Running", "results": []}
+
+        def stop_query(self, queryId: str) -> dict[str, Any]:
+            self.stopped.append(queryId)
+            return {"success": True}
+
+    logs = FakeLogsNeverDone()
+    factory = FakeClientFactory({"logs": logs})
+
+    result = json.loads(
+        query_logs(
+            CONFIG,
+            "ap-northeast-1",
+            log_group_names="/aws/lambda/my-func",
+            query_string="fields @message",
+            client_factory=factory,
+            timeout_seconds=0,
+        )
+    )
+
+    assert "error" in result
+    assert logs.stopped == ["query-1"]
+
+
 def test_get_metric_statisticsはディメンションJSONを解釈する() -> None:
     cw = FakeCloudWatch()
     factory = FakeClientFactory({"cloudwatch": cw})

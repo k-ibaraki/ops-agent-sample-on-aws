@@ -32,6 +32,8 @@ describe("OpsAgentStack", () => {
         SCORE_THRESHOLD: "50",
         LOOKBACK_HOURS: "24",
         SNS_TOPIC_ARN: Match.anyValue(),
+        // targetRegions 未指定でもデプロイ先リージョンが明示的に設定される
+        TARGET_REGIONS: { Ref: "AWS::Region" },
       }),
     });
   });

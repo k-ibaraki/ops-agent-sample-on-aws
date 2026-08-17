@@ -72,9 +72,9 @@ export class OpsAgentStack extends cdk.Stack {
         MODEL_ID: modelId,
         SCORE_THRESHOLD: String(scoreThreshold),
         LOOKBACK_HOURS: String(lookbackHours),
-        ...(targetRegions.length > 0
-          ? { TARGET_REGIONS: targetRegions.join(",") }
-          : {}),
+        // コンテナ側の AWS_REGION に暗黙依存しないよう、未指定でも明示的に設定する
+        TARGET_REGIONS:
+          targetRegions.length > 0 ? targetRegions.join(",") : cdk.Aws.REGION,
       },
     });
 
