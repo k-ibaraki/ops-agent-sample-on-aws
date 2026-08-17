@@ -16,6 +16,9 @@ JST = timezone(timedelta(hours=9))
 MAX_DESCRIPTION_CHARS = 3500
 MAX_SUBJECT_CHARS = 100
 
+# 問題同士の境目を示す区切り線
+DIVIDER = "─" * 24
+
 
 @dataclass(frozen=True)
 class Notification:
@@ -69,8 +72,12 @@ def build_notification(
 
     sections = [report.overall_summary]
     if notable:
-        sections.append(f"*⚠️ スコア {threshold} 点以上の問題*")
-        sections.extend(_format_notable(f) for f in notable)
+        sections.append(f"*⚠️ スコア {threshold} 点以上の問題（{len(notable)}件）*")
+        # 問題同士の境目が分かるよう、区切り線を挟む
+        for i, finding in enumerate(notable):
+            if i > 0:
+                sections.append(DIVIDER)
+            sections.append(_format_notable(finding))
     if minor:
         lines = "\n".join(
             f"{_severity_emoji(f.score)} {f.title}（スコア {f.score} / {f.region}）" for f in minor

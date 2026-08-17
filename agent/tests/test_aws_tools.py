@@ -158,6 +158,9 @@ def test_query_logsはLogsInsightsの結果を返す() -> None:
     assert result["status"] == "Complete"
     assert "ERROR: something broke" in json.dumps(result["results"])
     assert logs.start_query_kwargs["logGroupNames"] == ["/aws/lambda/my-func"]
+    # 時刻の解釈を自己記述する注記が含まれる
+    assert "UTC" in result["timezone_note"]
+    assert "アプリケーション依存" in result["timezone_note"]
 
 
 def test_query_logsはタイムアウト時にクエリを停止してエラーを返す() -> None:

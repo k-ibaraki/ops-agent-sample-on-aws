@@ -113,7 +113,16 @@ def query_logs(
     while True:
         response = client.get_query_results(queryId=query_id)
         if response["status"] not in ("Scheduled", "Running"):
-            return _dumps({"status": response["status"], "results": response.get("results", [])})
+            return _dumps(
+                {
+                    "status": response["status"],
+                    "results": response.get("results", []),
+                    "timezone_note": (
+                        "@timestamp と @ingestionTime は UTC。"
+                        "ログ本文（@message）内の時刻はアプリケーション依存でタイムゾーン保証なし"
+                    ),
+                }
+            )
         if time.monotonic() >= deadline:
             client.stop_query(queryId=query_id)
             return _dumps({"error": f"クエリが {timeout_seconds} 秒以内に完了しませんでした"})

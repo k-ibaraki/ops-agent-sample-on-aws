@@ -72,6 +72,9 @@ def test_システムプロンプトに時刻の扱いが定義されている()
     # 思考（ツールのデータ）は UTC、報告は JST という分担を明記する
     assert "UTC" in prompt
     assert "JST" in prompt
+    # ログ本文内の時刻はタイムゾーン保証がないことも明記する
+    assert "ログ本文" in prompt
+    assert "保証" in prompt
 
 
 def test_書式スキルの定義が存在する() -> None:

@@ -55,8 +55,12 @@ CloudWatch の調査ツールを使って過去 {config.lookback_hours} 時間�
 - 出力はすべて日本語で書く
 
 ## 時刻の扱い
-- ツールが返す時刻はすべて UTC。調査・推論は UTC のまま行ってよい
-- ただし最終レポートの文中に書く時刻・日付は、必ず JST（UTC+9）に変換して「JST」を明記する"""
+- AWS API が返すタイムスタンプは UTC（+00:00 のオフセット付き）。調査・推論は UTC のまま行ってよい
+- Logs Insights の @timestamp / @ingestionTime も UTC（オフセット表記なし）
+- ログ本文（@message）内に書かれた時刻はアプリケーション依存で、タイムゾーンは保証されない。
+  不明な場合は変換せず元の表記のまま引用し、タイムゾーン不明である旨を添える
+- 最終レポートに書く時刻・日付のうち、確実に変換できるものは JST（UTC+9）に変換して
+  「JST」を明記する"""
 
 
 def build_investigation_prompt(config: Config) -> str:

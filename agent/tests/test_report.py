@@ -65,6 +65,32 @@ def test_閾値以上の問題は詳細つきで強調される() -> None:
     assert "\n\n💡 推奨:\n" in description
 
 
+def test_複数の問題の間には区切り線が入る() -> None:
+    report = DailyReport(
+        overall_summary="2件検出",
+        findings=[make_finding(85, "問題A"), make_finding(60, "問題B")],
+    )
+
+    notification = build_notification(report, threshold=50, generated_at=GENERATED_AT)
+    description = json.loads(notification.message)["content"]["description"]
+
+    # 問題数 - 1 本の区切り線が入り、セクション見出しに件数が付く
+    assert description.count("─" * 24) == 1
+    assert "スコア 50 点以上の問題（2件）" in description
+
+
+def test_問題が1件なら区切り線は入らない() -> None:
+    report = DailyReport(
+        overall_summary="1件検出",
+        findings=[make_finding(85, "問題A")],
+    )
+
+    notification = build_notification(report, threshold=50, generated_at=GENERATED_AT)
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert "─" * 24 not in description
+
+
 def test_スコアに応じた深刻度の絵文字が付く() -> None:
     report = DailyReport(
         overall_summary="概況",
@@ -87,7 +113,7 @@ def test_スコアに応じた深刻度の絵文字が付く() -> None:
     assert "🔵 軽微（スコア 30 / ap-northeast-1）" in description
     assert "⚪ 情報（スコア 10 / ap-northeast-1）" in description
     # セクション見出しにも絵文字が付く
-    assert "*⚠️ スコア 50 点以上の問題*" in description
+    assert "*⚠️ スコア 50 点以上の問題（3件）*" in description
     assert "*📋 その他の検出事項（50 点未満）*" in description
 
 
