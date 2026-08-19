@@ -3,7 +3,7 @@
 from typing import Any
 
 import ops_agent.main as main_module
-from ops_agent.models import DailyReport, Finding
+from ops_agent.models import AdhocReport, DailyReport, Finding
 
 
 def test_entrypointは日次チェックを実行して結果概要を返す(monkeypatch: Any) -> None:
@@ -33,6 +33,29 @@ def test_entrypointは日次チェックを実行して結果概要を返す(mon
     result = main_module.invoke({"trigger": "scheduled"})
 
     assert result["status"] == "ok"
+    assert result["mode"] == "daily"
     assert result["findings_count"] == 1
     assert result["notable_count"] == 0
     assert captured["config"].sns_topic_arn.endswith(":topic")
+
+
+def test_entrypointは調査依頼を受けたらアドホック調査に振り分ける(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_adhoc(config: Any, question: str) -> AdhocReport:
+        captured["question"] = question
+        return AdhocReport(answer="回答", findings=[])
+
+    def fail_daily(config: Any) -> DailyReport:
+        raise AssertionError("日次チェックが呼ばれてはいけない")
+
+    monkeypatch.setenv("SNS_TOPIC_ARN", "arn:aws:sns:ap-northeast-1:123456789012:topic")
+    monkeypatch.setenv("AWS_REGION", "ap-northeast-1")
+    monkeypatch.setattr(main_module, "run_adhoc_investigation", fake_run_adhoc)
+    monkeypatch.setattr(main_module, "run_daily_check", fail_daily)
+
+    result = main_module.invoke({"trigger": "adhoc", "message": "昨日のエラーを詳しく"})
+
+    assert result["status"] == "ok"
+    assert result["mode"] == "adhoc"
+    assert captured["question"] == "昨日のエラーを詳しく"

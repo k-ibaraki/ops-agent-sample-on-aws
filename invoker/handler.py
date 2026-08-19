@@ -26,15 +26,29 @@ def _create_client() -> Any:
     )
 
 
+def _build_payload(event: dict[str, Any]) -> dict[str, Any] | None:
+    """イベントからエージェントへ渡すペイロードを組み立てる。中止すべきなら None を返す。"""
+    if event.get("trigger") != "adhoc":
+        return {"trigger": "scheduled", "time": event.get("time")}
+
+    # 依頼内容が空のまま日次チェックに落とすと、重複通知と余計な課金になる
+    message = str(event.get("message", "")).strip()
+    if not message:
+        return None
+    return {"trigger": "adhoc", "message": message}
+
+
 def handler(event: dict[str, Any] | None, context: Any) -> dict[str, Any]:
     """AgentCore Runtime を同期呼び出しし、エージェントの応答を返す。"""
     agent_runtime_arn = os.environ["AGENT_RUNTIME_ARN"]
     qualifier = os.environ.get("QUALIFIER", "DEFAULT")
 
-    payload = json.dumps(
-        {"trigger": "scheduled", "time": (event or {}).get("time")},
-        ensure_ascii=False,
-    )
+    payload_body = _build_payload(event or {})
+    if payload_body is None:
+        logger.warning("調査依頼の本文が空のため中止します")
+        return {"statusCode": 400, "error": "調査依頼の本文が空です"}
+
+    payload = json.dumps(payload_body, ensure_ascii=False)
     client = _create_client()
     response = client.invoke_agent_runtime(
         agentRuntimeArn=agent_runtime_arn,

@@ -1,9 +1,9 @@
-"""採点結果スキーマ（Finding / DailyReport）のテスト。"""
+"""採点結果スキーマ（Finding / DailyReport / AdhocReport）のテスト。"""
 
 import pytest
 from pydantic import ValidationError
 
-from ops_agent.models import DailyReport, Finding
+from ops_agent.models import AdhocReport, DailyReport, Finding
 
 
 def make_finding(score: int, title: str = "テスト問題") -> Finding:
@@ -43,3 +43,11 @@ def test_問題ゼロでもレポートは成立する() -> None:
     report = DailyReport(overall_summary="問題なし", findings=[])
 
     assert report.notable_findings(threshold=50) == []
+
+
+def test_アドホック回答は本文だけでも成立する() -> None:
+    # 質問への回答が主で、推奨アクションや関連する問題は任意
+    report = AdhocReport(answer="直近24時間にエラーはありません")
+
+    assert report.recommendations == []
+    assert report.findings == []

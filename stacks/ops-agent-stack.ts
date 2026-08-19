@@ -3,6 +3,7 @@ import * as cdk from "aws-cdk-lib/core";
 import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore";
 import * as chatbot from "aws-cdk-lib/aws-chatbot";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
+import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as scheduler from "aws-cdk-lib/aws-scheduler";
 import * as schedulerTargets from "aws-cdk-lib/aws-scheduler-targets";
@@ -21,6 +22,8 @@ export interface OpsAgentParameters {
   scoreThreshold: number;
   /** 調査対象の期間（時間） */
   lookbackHours: number;
+  /** Slack からの依頼で遡れる期間の上限（時間）。Logs Insights のスキャン量の歯止め */
+  maxLookbackHours: number;
   /** 監視対象リージョン。空配列ならデプロイ先リージョンのみ */
   targetRegions: string[];
   /** Slack ワークスペース ID（T で始まる）。channelId とセットで指定すると Slack 連携を作成 */
@@ -52,6 +55,7 @@ export function createOpsAgentStack(
     modelId,
     scoreThreshold,
     lookbackHours,
+    maxLookbackHours,
     targetRegions,
     slackWorkspaceId,
     slackChannelId,
@@ -76,6 +80,7 @@ export function createOpsAgentStack(
       MODEL_ID: modelId,
       SCORE_THRESHOLD: String(scoreThreshold),
       LOOKBACK_HOURS: String(lookbackHours),
+      MAX_LOOKBACK_HOURS: String(maxLookbackHours),
       // コンテナ側の AWS_REGION に暗黙依存しないよう、未指定でも明示的に設定する
       TARGET_REGIONS:
         targetRegions.length > 0 ? targetRegions.join(",") : cdk.Aws.REGION,
@@ -88,7 +93,10 @@ export function createOpsAgentStack(
       "cloudwatch:DescribeAlarms",
       "cloudwatch:DescribeAlarmHistory",
       "cloudwatch:GetMetricStatistics",
+      "cloudwatch:ListMetrics",
       "logs:DescribeLogGroups",
+      "logs:DescribeLogStreams",
+      "logs:FilterLogEvents",
       "logs:StartQuery",
       "logs:GetQueryResults",
       "logs:StopQuery",
@@ -137,12 +145,33 @@ export function createOpsAgentStack(
 
   // ---- Slack 連携（任意） ----
   if (slackWorkspaceId && slackChannelId) {
-    new chatbot.SlackChannelConfiguration(stack, "SlackNotification", {
-      slackChannelConfigurationName: `${stack.stackName}-notifications`,
-      slackWorkspaceId,
-      slackChannelId,
-      notificationTopics: [topic],
-    });
+    // Slack から実行できる操作は中継 Lambda の起動だけに絞る。
+    // チャネルロールとガードレールの両方を明示しないと、ガードレールは
+    // AdministratorAccess が既定になってしまう
+    const invokeInvoker = () =>
+      new iam.PolicyStatement({
+        actions: ["lambda:InvokeFunction"],
+        resources: [invoker.functionArn],
+      });
+
+    const slack = new chatbot.SlackChannelConfiguration(
+      stack,
+      "SlackNotification",
+      {
+        slackChannelConfigurationName: `${stack.stackName}-notifications`,
+        slackWorkspaceId,
+        slackChannelId,
+        notificationTopics: [topic],
+        guardrailPolicies: [
+          new iam.ManagedPolicy(stack, "SlackCommandGuardrail", {
+            description:
+              "Slack から実行できる操作を運用エージェントの起動だけに限定する",
+            statements: [invokeInvoker()],
+          }),
+        ],
+      },
+    );
+    slack.addToRolePolicy(invokeInvoker());
   }
 
   new cdk.CfnOutput(stack, "NotificationTopicArn", { value: topic.topicArn });
