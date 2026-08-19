@@ -252,6 +252,9 @@ def test_アドホック回答は依頼内容と回答を含む() -> None:
     # 依頼内容はエージェントの出力ではなく受け取った文字列をそのまま載せる
     assert "昨日の Lambda エラーを詳しく" in description
     assert "my-api-function のエラーは依存先のタイムアウトが原因です" in description
+    # 見出しが無いと依頼内容と回答が地続きに見えるため、回答にも見出しを付ける
+    assert "*📝 回答*\nmy-api-function のエラーは依存先のタイムアウトが原因です" in description
+    assert description.index("*❓ 依頼内容*") < description.index("*📝 回答*")
     # 推奨アクションはコード側で採番する
     assert "1. 接続タイムアウトを見直す" in description
     assert "2. リトライ設定を確認する" in description
@@ -295,6 +298,9 @@ def test_調査失敗時は依頼者に失敗を知らせる通知になる() ->
     )
     message = json.loads(notification.message)
 
+    description = message["content"]["description"]
     assert "失敗" in message["content"]["title"]
-    assert "昨日の Lambda エラーを詳しく" in message["content"]["description"]
-    assert "ThrottlingException" in message["content"]["description"]
+    assert "昨日の Lambda エラーを詳しく" in description
+    assert "ThrottlingException" in description
+    # 回答と同じく、依頼内容と地続きに見えないよう見出しで区切る
+    assert "*📝 結果*" in description

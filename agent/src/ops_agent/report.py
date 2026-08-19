@@ -166,7 +166,8 @@ def build_adhoc_notification(
     time_str = generated_at.astimezone(JST).strftime("%m-%d %H:%M")
     question_text = _question_text(question)
 
-    sections = [f"*❓ 依頼内容*\n{question_text}", report.answer]
+    # 回答にも見出しを付けないと、依頼内容と地続きに見えて境目が分からない
+    sections = [f"*❓ 依頼内容*\n{question_text}", f"*📝 回答*\n{report.answer}"]
     if report.recommendations:
         lines = "\n".join(f"{i}. {r}" for i, r in enumerate(report.recommendations, 1))
         sections.append(f"*💡 推奨アクション*\n{lines}")
@@ -196,6 +197,7 @@ def build_failure_notification(
     question_text = _question_text(question)
     description = (
         f"*❓ 依頼内容*\n{question_text}\n\n"
+        f"*📝 結果*\n"
         f"調査の途中でエラーが発生したため、回答を作成できませんでした。\n"
         f"時間をおいて再度依頼するか、実行ログを確認してください。\n\n"
         f"*⚠️ エラー内容*\n{_clip(error.strip(), MAX_ERROR_CHARS)}"
