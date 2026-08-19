@@ -4,18 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-AWS アカウントの日次ヘルスチェックを行う運用エージェントのサンプル。毎朝定時に Bedrock AgentCore 上のエージェント（Strands Agents / Python）が起動し、過去 24 時間の CloudWatch を自律調査して、問題を 0〜100 点で採点し SNS 経由で Slack に通知する。
+AWS アカウントの日次ヘルスチェックを行う運用エージェントのサンプル。毎朝定時に Bedrock AgentCore 上のエージェント（Strands Agents / Python）が起動し、過去 24 時間の CloudWatch を自律調査して、問題を 0〜100 点で採点し SNS 経由で Slack に通知する。加えて、Slack から自由文で追加調査を依頼できる（調査と報告のみ。書き込み系の実作業は行わない）。
 
 処理の流れ:
 
 ```
-EventBridge Scheduler（毎朝 8:00 JST）
-  → 中継 Lambda（invoker/handler.py、同期で InvokeAgentRuntime）
-    → AgentCore Runtime（agent/、Strands Agents）
-        ├─ CloudWatch 調査ツール群（読み取り専用）で自律調査
-        └─ 採点結果を構造化出力 → 整形 → SNS Publish
-          → Amazon Q Developer in chat applications（旧 AWS Chatbot）→ Slack
+EventBridge Scheduler（毎朝 8:00 JST）      ┐
+                                            ├→ 中継 Lambda（invoker/handler.py）
+Slack（@Amazon Q run ops "..."）           ┘     → AgentCore Runtime（agent/、Strands Agents）
+                                                     ├─ CloudWatch 調査ツール群（読み取り専用）
+                                                     └─ 採点結果を構造化出力 → 整形 → SNS Publish
+                                                          → Amazon Q Developer in chat applications
+                                                            （旧 AWS Chatbot）→ Slack
 ```
+
+2 経路の違い: スケジュール起動は同期（`InvokeAgentRuntime` の完了を待つ）、Slack からの依頼は
+`--invocation-type Event` による非同期。中継 Lambda はペイロードの `trigger`（`scheduled` /
+`adhoc`）で振り分ける。
 
 設計決定の経緯は docs/DESIGN.md（決定事項の一覧表）、実装時のつまずきは docs/implementation-log.md に記録されている。設計変更時はこれらも更新する。
 
@@ -81,10 +86,11 @@ pnpm test
 
 LLM に任せる範囲を意図的に絞っている。この分離はセキュリティ設計（プロンプトインジェクション対策）でもあるため、変更時も維持すること:
 
-- **LLM が扱うのは調査と採点だけ**: `agent.py` の `run_daily_check()` が「調査（自律ツール使用）→ `structured_output()` で `DailyReport`（Pydantic、`models.py`）に採点結果を受け取る」を実行する
-- **通知の整形と SNS 発行は LLM を介さない通常のコード**: `report.py`（Amazon Q Developer カスタム通知形式への整形、JST 変換）と `notifier.py`。純粋関数なのでテスト可能
-- **ツールは読み取り専用のみ**: `aws_tools.py` は boto3 の薄いラッパー 5 種。対象リージョンを `Config.target_regions` の許可リストで検証する。書き込み系の権限・ツールをエージェントに追加しない方針
-- **レポート文面の書式は Strands Skills で誘導**: `skills/slack-report-style/SKILL.md`
+- **LLM が扱うのは調査と採点だけ**: `agent.py` の `run_daily_check()` / `run_adhoc_investigation()` が「調査（自律ツール使用）→ `structured_output()` で `DailyReport` / `AdhocReport`（Pydantic、`models.py`）に結果を受け取る」を実行する
+- **通知の整形と SNS 発行は LLM を介さない通常のコード**: `report.py`（Amazon Q Developer カスタム通知形式への整形、JST 変換）と `notifier.py`。純粋関数なのでテスト可能。Slack への回答に載る依頼文は、LLM の出力ではなく受け取った文字列をそのまま使う
+- **ツールは読み取り専用のみ**: `aws_tools.py` は boto3 の薄いラッパー 8 種。対象リージョンを `Config.target_regions` の許可リストで検証し、調査期間は `Config.max_lookback_hours` で頭打ちにする（`_resolve_hours()` が唯一の経路）。書き込み系の権限・ツールをエージェントに追加しない方針
+- **レポート文面の書式は Strands Skills で誘導**: `skills/` 配下（`slack-report-style` / `adhoc-report-style`）。`AgentSkills` には `skills/` ごと渡して両方読み込ませる
+- **Slack からの依頼は非同期なので失敗も必ず通知する**: `run_adhoc_investigation()` は例外時に失敗通知を発行してから再送出する（依頼者を待たせ続けないため）
 - **設定は環境変数経由**: `config.py` の `Config.from_env()`。環境変数は CDK スタック（`stacks/ops-agent-stack.ts` の `environmentVariables`）が設定するため、設定項目の追加時は両側の変更が必要
 - **時刻の扱い**: 調査・推論は UTC のまま、最終レポートは JST 変換して「JST」を明記（システムプロンプトと `report.py` の両方に規定がある）
 
@@ -95,6 +101,7 @@ LLM に任せる範囲を意図的に絞っている。この分離はセキュ�
 - AgentCore Runtime は `aws_bedrockagentcore` の L2 construct で、`agent/` の Dockerfile を linux/arm64 でビルドしてデプロイする
 - IAM はエージェントの調査ツールが使う読み取り API のみの最小権限。ツール追加時は `runtime.grant()` のアクション一覧も更新する
 - 中継 Lambda と Scheduler はリトライ 0 回に設定（エージェントの多重実行 = 重複通知を防ぐため）。この設定を変えないこと
+- Slack 連携を作る場合、チャネルロールとガードレールポリシーの両方を中継 Lambda の `lambda:InvokeFunction` だけに絞る。ガードレールは未指定だと AdministratorAccess が既定になるため省略しないこと
 
 ### テストの構成
 
