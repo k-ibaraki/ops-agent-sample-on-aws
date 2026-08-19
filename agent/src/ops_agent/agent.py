@@ -37,8 +37,13 @@ class InvestigatorAgent(Protocol):
 
 def build_system_prompt(config: Config) -> str:
     return f"""あなたは AWS アカウントの運用監視を担当する SRE エージェントです。
-CloudWatch の調査ツールを使って過去 {config.lookback_hours} 時間の状態を調査し、
-気になる問題を見つけて採点してください。
+CloudWatch の調査ツールで事実を集め、日次の定期チェックでは気になる問題を採点し、
+個別の調査依頼ではその依頼に答えてください。
+
+## 調査期間
+- 各ツールは既定で過去 {config.lookback_hours} 時間を調べる
+- より長い期間が必要なら、ツールの hours 引数で最大 {config.max_lookback_hours} 時間まで指定できる
+- 期間を広げるほどログのスキャン量と費用が増えるため、依頼に必要なときだけ広げる
 
 ## 採点基準（0〜100 点）
 以下の 3 つの観点を総合して採点します。
@@ -54,7 +59,9 @@ CloudWatch の調査ツールを使って過去 {config.lookback_hours} 時間�
 - 0〜24: 情報レベル（対応不要の可能性が高い）
 
 ## 調査の方針
-- まずアラームの状態と履歴で全体を把握し、怪しい箇所をログとメトリクスで深掘りする
+- 日次の定期チェックでは、まずアラームの状態と履歴で全体を把握し、
+  怪しい箇所をログとメトリクスで深掘りする
+- 個別の調査依頼では、依頼が指す対象から調べ始め、答えに必要な範囲だけ広げる
 - 事実（ツールの結果）に基づいて判断し、推測で問題をでっち上げない
 - 問題が見つからなければ、無理に問題を作らず「異常なし」と報告する
 - 出力はすべて日本語で書く
@@ -139,6 +146,17 @@ def run_daily_check(
     return report
 
 
+def _publish_failure(sns_client: Any, config: Config, question: str, error: str) -> None:
+    """調査依頼に応えられなかったことを依頼者に伝える。"""
+    publish_notification(
+        sns_client,
+        topic_arn=config.sns_topic_arn,
+        notification=build_failure_notification(
+            question=question, error=error, generated_at=datetime.now(UTC)
+        ),
+    )
+
+
 def run_adhoc_investigation(
     config: Config,
     question: str,
@@ -149,6 +167,12 @@ def run_adhoc_investigation(
     """Slack から届いた調査依頼を調べ、回答を通知する。"""
     if sns_client is None:
         sns_client = boto3.client("sns")
+
+    question = question.strip()
+    if not question:
+        # 中継 Lambda は SNS 権限を持たないため、空依頼を伝えられるのはここだけ
+        _publish_failure(sns_client, config, question, "調査依頼の本文が空です")
+        raise ValueError("調査依頼の本文が空です")
 
     try:
         # 組み立て自体もモデル ID やスキルの不備で失敗しうるため、通知の対象に含める
@@ -162,13 +186,7 @@ def run_adhoc_investigation(
         )
     except Exception as exc:
         # 非同期実行のため、失敗を伝えないと依頼者は結果を待ち続けることになる
-        publish_notification(
-            sns_client,
-            topic_arn=config.sns_topic_arn,
-            notification=build_failure_notification(
-                question=question, error=str(exc), generated_at=datetime.now(UTC)
-            ),
-        )
+        _publish_failure(sns_client, config, question, str(exc))
         raise
 
     notification = build_adhoc_notification(

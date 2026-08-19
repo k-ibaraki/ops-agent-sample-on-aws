@@ -82,6 +82,22 @@ def test_システムプロンプトに採点基準が含まれる() -> None:
     assert "継続性" in prompt
 
 
+def test_システムプロンプトに調査期間の既定と上限が示される() -> None:
+    prompt = build_system_prompt(CONFIG)
+
+    # 既定と上限は設定値から埋め込む（アドホック依頼で期間を広げる判断に使う）
+    assert f"{CONFIG.lookback_hours} 時間" in prompt
+    assert f"{CONFIG.max_lookback_hours} 時間" in prompt
+    assert "hours" in prompt
+
+
+def test_システムプロンプトは採点と依頼への回答の両方を役割に含む() -> None:
+    prompt = build_system_prompt(CONFIG)
+
+    assert "採点" in prompt
+    assert "依頼" in prompt
+
+
 def test_システムプロンプトに時刻の扱いが定義されている() -> None:
     prompt = build_system_prompt(CONFIG)
 
@@ -175,6 +191,19 @@ def test_アドホック調査の失敗は依頼者に通知してから送出�
     message = json.loads(sns.publish_kwargs["Message"])
     assert "失敗" in message["content"]["title"]
     assert "ThrottlingException" in message["content"]["description"]
+
+
+def test_依頼内容が空なら調査せずに失敗を通知する() -> None:
+    agent = FakeAgent(ADHOC_REPORT)
+    sns = FakeSns()
+
+    # 中継 Lambda は SNS 権限を持たないため、空依頼の通知はエージェント側で行う
+    with pytest.raises(ValueError, match="空"):
+        run_adhoc_investigation(CONFIG, "   ", agent=agent, sns_client=sns)
+
+    assert agent.prompts == []
+    message = json.loads(sns.publish_kwargs["Message"])
+    assert "失敗" in message["content"]["title"]
 
 
 def test_エージェントの組み立てに失敗した場合も依頼者に通知される(monkeypatch: Any) -> None:

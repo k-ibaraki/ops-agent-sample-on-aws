@@ -74,7 +74,7 @@ def test_handlerはSlackからの調査依頼をそのまま引き渡す(monkeyp
     assert payload["message"] == "昨日のエラーを詳しく"
 
 
-def test_handlerは依頼内容が空なら日次チェックに落とさず中止する(monkeypatch: Any) -> None:
+def test_handlerは依頼内容が空でも日次チェックには落とさない(monkeypatch: Any) -> None:
     client = FakeAgentCoreClient()
     monkeypatch.setenv(
         "AGENT_RUNTIME_ARN",
@@ -82,8 +82,9 @@ def test_handlerは依頼内容が空なら日次チェックに落とさず中�
     )
     monkeypatch.setattr(invoker, "_create_client", lambda: client)
 
-    # 空依頼で日次チェックが走ると、重複通知と余計な課金になる
-    result = invoker.handler({"trigger": "adhoc", "message": "   "}, None)
+    # 空依頼で日次チェックが走ると重複通知と余計な課金になる。
+    # 空依頼そのものの扱い（依頼者への通知）は SNS 権限を持つエージェント側で行う
+    invoker.handler({"trigger": "adhoc", "message": "   "}, None)
 
-    assert result["statusCode"] == 400
-    assert client.invoke_kwargs == {}
+    payload = json.loads(client.invoke_kwargs["payload"])
+    assert payload["trigger"] == "adhoc"

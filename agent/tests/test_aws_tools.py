@@ -285,6 +285,44 @@ def test_期間は上限を超えられない() -> None:
     assert delta.total_seconds() == CONFIG.max_lookback_hours * 3600
 
 
+def test_期間はすべての期間つきツールに伝わる() -> None:
+    cw = FakeCloudWatch()
+    logs = FakeLogs()
+    factory = FakeClientFactory({"cloudwatch": cw, "logs": logs})
+
+    query_logs(
+        CONFIG,
+        "ap-northeast-1",
+        log_group_names="/aws/lambda/my-func",
+        query_string="fields @message",
+        hours=72,
+        client_factory=factory,
+    )
+    filter_log_events(
+        CONFIG,
+        "ap-northeast-1",
+        log_group_name="/aws/lambda/my-func",
+        hours=72,
+        client_factory=factory,
+    )
+    get_metric_statistics(
+        CONFIG,
+        "ap-northeast-1",
+        namespace="AWS/Lambda",
+        metric_name="Errors",
+        hours=72,
+        client_factory=factory,
+    )
+
+    # Logs Insights はエポック秒、filter_log_events はエポックミリ秒
+    q = logs.start_query_kwargs
+    assert q["endTime"] - q["startTime"] == 72 * 3600
+    f = logs.filter_kwargs
+    assert f["endTime"] - f["startTime"] == 72 * 3600 * 1000
+    m = cw.metric_kwargs
+    assert (m["EndTime"] - m["StartTime"]).total_seconds() == 72 * 3600
+
+
 def test_filter_log_eventsはログイベントをUTCのISO形式で返す() -> None:
     logs = FakeLogs()
     factory = FakeClientFactory({"logs": logs})

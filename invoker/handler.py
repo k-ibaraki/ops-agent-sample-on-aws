@@ -26,16 +26,15 @@ def _create_client() -> Any:
     )
 
 
-def _build_payload(event: dict[str, Any]) -> dict[str, Any] | None:
-    """イベントからエージェントへ渡すペイロードを組み立てる。中止すべきなら None を返す。"""
+def _build_payload(event: dict[str, Any]) -> dict[str, Any]:
+    """イベントからエージェントへ渡すペイロードを組み立てる。
+
+    依頼内容が空でも日次チェックには落とさない。空依頼を依頼者に伝えるには SNS 発行が
+    必要で、その権限を持つのはエージェント側だけのため、判定もエージェント側に任せる。
+    """
     if event.get("trigger") != "adhoc":
         return {"trigger": "scheduled", "time": event.get("time")}
-
-    # 依頼内容が空のまま日次チェックに落とすと、重複通知と余計な課金になる
-    message = str(event.get("message", "")).strip()
-    if not message:
-        return None
-    return {"trigger": "adhoc", "message": message}
+    return {"trigger": "adhoc", "message": str(event.get("message", ""))}
 
 
 def handler(event: dict[str, Any] | None, context: Any) -> dict[str, Any]:
@@ -43,12 +42,7 @@ def handler(event: dict[str, Any] | None, context: Any) -> dict[str, Any]:
     agent_runtime_arn = os.environ["AGENT_RUNTIME_ARN"]
     qualifier = os.environ.get("QUALIFIER", "DEFAULT")
 
-    payload_body = _build_payload(event or {})
-    if payload_body is None:
-        logger.warning("調査依頼の本文が空のため中止します")
-        return {"statusCode": 400, "error": "調査依頼の本文が空です"}
-
-    payload = json.dumps(payload_body, ensure_ascii=False)
+    payload = json.dumps(_build_payload(event or {}), ensure_ascii=False)
     client = _create_client()
     response = client.invoke_agent_runtime(
         agentRuntimeArn=agent_runtime_arn,

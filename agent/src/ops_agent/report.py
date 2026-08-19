@@ -38,6 +38,11 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _question_text(question: str) -> str:
+    """通知に載せる依頼内容。利用者が書いた文字列なので長さを抑え、空なら明示する。"""
+    return _clip(question.strip(), MAX_QUESTION_CHARS) or "(未入力)"
+
+
 def _one_line(text: str) -> str:
     """件名に使えるよう、改行と連続空白を潰して1行にする。"""
     return " ".join(text.split())
@@ -130,7 +135,7 @@ def build_adhoc_notification(
 ) -> Notification:
     """Slack から依頼された調査への回答を、カスタム通知形式に組み立てる。"""
     time_str = generated_at.astimezone(JST).strftime("%m-%d %H:%M")
-    question_text = _clip(question.strip(), MAX_QUESTION_CHARS)
+    question_text = _question_text(question)
 
     sections = [f"*❓ 依頼内容*\n{question_text}", report.answer]
     if report.recommendations:
@@ -159,7 +164,7 @@ def build_failure_notification(
     非同期実行のため、失敗を通知しないと依頼者は結果を待ち続けることになる。
     """
     time_str = generated_at.astimezone(JST).strftime("%m-%d %H:%M")
-    question_text = _clip(question.strip(), MAX_QUESTION_CHARS)
+    question_text = _question_text(question)
     description = (
         f"*❓ 依頼内容*\n{question_text}\n\n"
         f"調査の途中でエラーが発生したため、回答を作成できませんでした。\n"
