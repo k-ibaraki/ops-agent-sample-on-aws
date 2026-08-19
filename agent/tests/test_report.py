@@ -3,8 +3,13 @@
 import json
 from datetime import UTC, datetime
 
-from ops_agent.models import DailyReport, Finding
-from ops_agent.report import build_notification
+from ops_agent.models import AdhocReport, DailyReport, Finding
+from ops_agent.report import (
+    MAX_DESCRIPTION_CHARS,
+    build_adhoc_notification,
+    build_failure_notification,
+    build_notification,
+)
 
 GENERATED_AT = datetime(2026, 8, 17, 8, 0, tzinfo=UTC)
 
@@ -152,3 +157,144 @@ def test_件名は100文字以内で日付を含む() -> None:
 
     assert len(notification.subject) <= 100
     assert "2026-08-17" in notification.subject
+
+
+def test_日次通知の末尾に追加調査の依頼例が載る() -> None:
+    report = DailyReport(overall_summary="異常なし", findings=[])
+
+    notification = build_notification(report, threshold=50, generated_at=GENERATED_AT)
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert description.rstrip().endswith('`@Amazon Q run ops "調べたい内容"`')
+
+
+def test_依頼例は本文が長くても切り詰められない() -> None:
+    # 本文を先に切り詰めてから依頼例を付けるため、依頼例は必ず残る
+    report = DailyReport(overall_summary="x" * (MAX_DESCRIPTION_CHARS * 2), findings=[])
+
+    notification = build_notification(report, threshold=50, generated_at=GENERATED_AT)
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert "@Amazon Q run ops" in description
+    assert len(description) <= MAX_DESCRIPTION_CHARS
+
+
+def test_関数名を渡すと初回のエイリアス作成コマンドも載る() -> None:
+    # 依頼方法だけ載せても、エイリアス未作成の人は実行できない
+    report = DailyReport(overall_summary="異常なし", findings=[])
+
+    notification = build_notification(
+        report,
+        threshold=50,
+        generated_at=GENERATED_AT,
+        invoker_function_name="OpsAgentOnAwsStack-invoker",
+        invoker_region="ap-northeast-1",
+    )
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert "alias create ops" in description
+    # 関数名は実物を載せる（利用者に調べさせない）
+    assert "--function-name OpsAgentOnAwsStack-invoker" in description
+    assert "--invocation-type Event" in description
+    assert '"trigger": "adhoc"' in description
+    # リージョン未指定だと Amazon Q Developer が実行時に入力を求めてくる
+    assert "--region ap-northeast-1" in description
+    # JSON は空白を含むため、--payload は必ず最後に置く
+    assert description.index("--region") < description.index("--payload")
+
+
+def test_リージョンが不明ならエイリアス作成コマンドは載せない() -> None:
+    # 不完全な作成コマンドを載せると、実行時に入力を求められて詰まる
+    report = DailyReport(overall_summary="異常なし", findings=[])
+
+    notification = build_notification(
+        report,
+        threshold=50,
+        generated_at=GENERATED_AT,
+        invoker_function_name="OpsAgentOnAwsStack-invoker",
+    )
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert "alias create" not in description
+    assert "@Amazon Q run ops" in description
+
+
+def test_エイリアス作成コマンドも本文が長いとき切り詰められない() -> None:
+    report = DailyReport(overall_summary="x" * (MAX_DESCRIPTION_CHARS * 2), findings=[])
+
+    notification = build_notification(
+        report,
+        threshold=50,
+        generated_at=GENERATED_AT,
+        invoker_function_name="OpsAgentOnAwsStack-invoker",
+        invoker_region="ap-northeast-1",
+    )
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert "alias create ops" in description
+    assert len(description) <= MAX_DESCRIPTION_CHARS
+
+
+def test_アドホック回答は依頼内容と回答を含む() -> None:
+    report = AdhocReport(
+        answer="my-api-function のエラーは依存先のタイムアウトが原因です",
+        recommendations=["接続タイムアウトを見直す", "リトライ設定を確認する"],
+        findings=[make_finding(70, "依存先タイムアウト")],
+    )
+
+    notification = build_adhoc_notification(
+        report, question="昨日の Lambda エラーを詳しく", generated_at=GENERATED_AT
+    )
+    message = json.loads(notification.message)
+    description = message["content"]["description"]
+
+    assert message["source"] == "custom"
+    # 依頼内容はエージェントの出力ではなく受け取った文字列をそのまま載せる
+    assert "昨日の Lambda エラーを詳しく" in description
+    assert "my-api-function のエラーは依存先のタイムアウトが原因です" in description
+    # 推奨アクションはコード側で採番する
+    assert "1. 接続タイムアウトを見直す" in description
+    assert "2. リトライ設定を確認する" in description
+    assert "🟠 依存先タイムアウト（スコア 70 / ap-northeast-1）" in description
+
+
+def test_アドホック回答の依頼内容は長さと改行が整えられる() -> None:
+    report = AdhocReport(answer="回答")
+    question = "とても長い依頼\n" * 200
+
+    notification = build_adhoc_notification(report, question=question, generated_at=GENERATED_AT)
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert len(description) <= MAX_DESCRIPTION_CHARS
+    # 件名に改行は入れられない
+    assert "\n" not in notification.subject
+    assert len(notification.subject) <= 100
+
+
+def test_アドホック回答の太字も行全体を包む() -> None:
+    report = AdhocReport(
+        answer="回答本文",
+        recommendations=["対応1"],
+        findings=[make_finding(80, "問題A")],
+    )
+
+    notification = build_adhoc_notification(report, question="質問", generated_at=GENERATED_AT)
+    description = json.loads(notification.message)["content"]["description"]
+
+    for line in description.split("\n"):
+        if "*" in line:
+            assert line.startswith("*") and line.endswith("*"), line
+            assert "*" not in line[1:-1], line
+
+
+def test_調査失敗時は依頼者に失敗を知らせる通知になる() -> None:
+    notification = build_failure_notification(
+        question="昨日の Lambda エラーを詳しく",
+        error="ThrottlingException: rate exceeded",
+        generated_at=GENERATED_AT,
+    )
+    message = json.loads(notification.message)
+
+    assert "失敗" in message["content"]["title"]
+    assert "昨日の Lambda エラーを詳しく" in message["content"]["description"]
+    assert "ThrottlingException" in message["content"]["description"]

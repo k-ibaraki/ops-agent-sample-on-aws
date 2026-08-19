@@ -57,3 +57,34 @@ def test_handlerはAgentCoreRuntimeを呼び出して結果を返す(monkeypatch
     payload = json.loads(kwargs["payload"])
     assert payload["trigger"] == "scheduled"
     assert payload["time"] == "2026-08-17T23:00:00Z"
+
+
+def test_handlerはSlackからの調査依頼をそのまま引き渡す(monkeypatch: Any) -> None:
+    client = FakeAgentCoreClient()
+    monkeypatch.setenv(
+        "AGENT_RUNTIME_ARN",
+        "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:runtime/ops-agent-abc",
+    )
+    monkeypatch.setattr(invoker, "_create_client", lambda: client)
+
+    invoker.handler({"trigger": "adhoc", "message": "昨日のエラーを詳しく"}, None)
+
+    payload = json.loads(client.invoke_kwargs["payload"])
+    assert payload["trigger"] == "adhoc"
+    assert payload["message"] == "昨日のエラーを詳しく"
+
+
+def test_handlerは依頼内容が空でも日次チェックには落とさない(monkeypatch: Any) -> None:
+    client = FakeAgentCoreClient()
+    monkeypatch.setenv(
+        "AGENT_RUNTIME_ARN",
+        "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:runtime/ops-agent-abc",
+    )
+    monkeypatch.setattr(invoker, "_create_client", lambda: client)
+
+    # 空依頼で日次チェックが走ると重複通知と余計な課金になる。
+    # 空依頼そのものの扱い（依頼者への通知）は SNS 権限を持つエージェント側で行う
+    invoker.handler({"trigger": "adhoc", "message": "   "}, None)
+
+    payload = json.loads(client.invoke_kwargs["payload"])
+    assert payload["trigger"] == "adhoc"

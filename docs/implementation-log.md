@@ -109,6 +109,140 @@ Slack 通知の文面が長文の塊になり読みづらいというフィー�
 - 複数の問題が並ぶと境目が分かりにくいという指摘を受け、問題同士の間に区切り線（─ x 24）を挟み、
   セクション見出しに件数を付けた
 
+## 2026-08-19: Slack からの追加調査依頼に対応
+
+日次通知を読んで気になった点を、その場で Slack から深掘りできるようにした（DESIGN.md 決定 18〜25）。
+エージェントが実作業（書き込み系の操作）をする機能は見送り、調査と報告だけに留めている。
+
+### 受け口の選定
+
+当初は「シークレット管理が要るので新規 Slack App しかない」と判断したが、これは誤りだった。
+Amazon Q Developer in chat applications は通知だけでなく双方向に対応しており、
+チャンネルから `lambda invoke` を実行できる（公式チュートリアルもある）。
+さらにコマンドエイリアスは `$変数` のプレースホルダを `--payload` の JSON 内に埋め込めるため、
+シークレット管理を増やさずに自由文の依頼を受けられる。
+
+- エイリアス定義: `@Amazon Q alias create ops lambda invoke --function-name <名前> --invocation-type Event --payload {"trigger": "adhoc", "message": "$question"}`
+- 実行: `@Amazon Q run ops "..."`
+- 同じエイリアスは位置引数（`run ops "..."`）と名前付き（`run ops --question "..."`）の
+  どちらでも呼べる。パラメータが 1 つなので最短の位置引数を主な案内とし、
+  名前付き形式は README に補足として載せるに留めた。
+  なお名前付きのフラグ名は定義の変数名がそのまま使われる仕様で、`-q` のような
+  ハイフン 1 つの短縮形は文書化されていない
+- エイリアスはチャンネルごとの設定で CDK 管理外のため、README に手動手順として記載した
+
+### 実装
+
+- `Config.max_lookback_hours`（環境変数 `MAX_LOOKBACK_HOURS` / `parameter.ts` の `maxLookbackHours`、デフォルト 168 時間）を追加。
+  全調査ツールに `hours` 引数を足し、`_resolve_hours()` を唯一の経路にして上限をコード側で強制する。
+  上限が `lookback_hours` を下回る設定は `Config` 側で丸める
+- 調査ツールを 3 種追加（`filter_log_events` / `describe_log_streams` / `list_metrics`）。
+  `filter_log_events` は件数（50 件）とメッセージ長（1000 文字）の両方に上限を設けた。
+  Logs Insights と違いクエリ課金がないため、生ログの前後関係を追う用途ではこちらを使わせる
+- `AdhocReport`（Pydantic）と `build_adhoc_notification()` / `build_failure_notification()` を追加。
+  通知に載る依頼文は LLM の出力ではなく受け取った文字列をそのまま使う
+- 日次通知の末尾に依頼のコマンド例を付けた。本文を先に切り詰めてから連結し、
+  切り詰めでコマンド例が消えないようにしている
+- 書式は `adhoc-report-style` スキルを新設して誘導。`AgentSkills` にはスキル個別ではなく
+  `skills/` ディレクトリごと渡す形に変えた（親ディレクトリを渡すと配下のスキルをすべて読み込む）
+- 中継 Lambda はペイロードの `trigger` で振り分ける。依頼文が空でも日次チェックには
+  落とさない（重複通知と余計な課金になるため）。空依頼の判定はエージェント側に置いた。
+  中継 Lambda は SNS 発行権限を持たず、非同期起動で戻り値も捨てられるため、
+  ここで中止しても依頼者には何も伝わらないため
+- Slack 連携時のみ、チャネルロールとガードレールポリシーの双方を中継 Lambda の
+  `lambda:InvokeFunction` に限定して CDK で作成する。ガードレールは未指定だと
+  AdministratorAccess が既定になるため、明示が必須
+
+### 実装上の判断・つまずき
+
+- 非同期実行のため、失敗すると依頼者が結果を待ち続ける穴があった。
+  `run_adhoc_investigation()` で例外を捕まえ、失敗通知を発行してから再送出する形にした。
+  エージェントの組み立て（モデル ID の誤りなど）と空依頼も同じ扱いにしている
+- デプロイ前のセルフレビューで、システムプロンプトが日次採点前提のまま
+  「過去 24 時間の状態を調査し、問題を採点してください」と固定されていることに気づいた。
+  アドホック側のプロンプトが「最大 168 時間まで広げられる」と言っても、
+  優先されやすいシステムプロンプトと矛盾して期間拡張が働かない恐れがあったため、
+  調査期間（既定と上限は設定値を埋め込む）と役割（採点／依頼への回答）を
+  両モード共通の書き方に改めた
+- `InvestigatorAgent` プロトコルの `structured_output` を型パラメータ付き
+  （`def structured_output[T: BaseModel](...) -> T`）にして、2 種類のレポートを扱えるようにした
+
+### 検証結果
+
+- Python: pytest 53 件パス / ruff・ty クリーン
+- CDK: jest 13 件パス / `cdk synth` 成功
+- 未検証（デプロイ時に確認する）:
+  1. Amazon Q Developer のエイリアスが `--invocation-type Event` を受け付けるか。
+     受け付けない場合は、同期応答で受付メッセージを返す受付 Lambda を新設して、
+     そこから既存の中継 Lambda を `InvocationType=Event` で起動する形に切り替える
+  2. `--payload` に生の JSON をそのまま渡せるか。AWS CLI v2 では base64 と解釈されるため
+     README の手動実行例には `--cli-binary-format raw-in-base64-out` を付けている
+     （公式チュートリアルは生の JSON を渡しているので通る見込み）。
+     通らない場合はペイロードのエンコード方法を変えて対応する
+
+## 2026-08-19: デプロイ後の動作確認と修正
+
+東京リージョンへデプロイして日次チェックの動作を確認し、3 点を修正した。
+
+### 構造化出力の間欠的な失敗
+
+1 回目の手動実行が 88.8 秒で失敗した。
+
+```
+ValueError: No valid tool use or tool use input was found in the Bedrock response.
+```
+
+調査フェーズは完走しており、`structured_output` でモデルが期待するツール呼び出しを
+返さなかったという内容。切り分けの結果、決定的なコードバグではなく間欠的な事象だった。
+
+| 実行 | 結果 |
+|------|------|
+| デプロイ前のスケジュール実行 | 成功（135.6 秒） |
+| デプロイ後 1 回目 | 失敗（88.8 秒） |
+| デプロイ後 2 回目 | 成功（129 秒） |
+| ローカル再現（同一コード・同一設定） | 成功 |
+
+IAM にも権限不足はなかった。日次パスには失敗通知もリトライも無く、失敗すると Slack に
+何も出ないため、`structured_output` を初回 + リトライ 2 回まで再試行するようにした。
+Strands の `structured_output` は `temp_messages`（`self.messages` のコピー）を使い
+会話履歴を変更しないため、単純な再試行で安全に実装できる。
+
+### 中継 Lambda の関数名を固定
+
+README のエイリアス作成手順と手動実行例が `<InvokerFunction の関数名>` のプレースホルダで、
+利用者に CDK の自動生成名を調べさせる作りになっていた。関数名を `<スタック名>-invoker` で
+固定し、README・`CfnOutput`・日次通知の 3 箇所すべてに実名を載せるようにした。
+
+エージェント側には環境変数 `INVOKER_FUNCTION_NAME` で名前を渡す。construct 参照
+（`invoker.functionArn`）ではなく文字列で持つことで、Runtime → Lambda → Runtime の
+循環参照を避けている。日次通知の末尾には、依頼コマンドに加えて初回のエイリアス作成
+コマンドも実名入りで載せ、通知からコピーするだけで使い始められるようにした。
+
+### Slack でエイリアスを実行したらリージョンを聞かれた
+
+実際に Slack でエイリアスを作って実行したところ、Amazon Q Developer が
+「Enter a value for `region`」と入力を求めてきた。CLI コマンドの実行にはリージョンが
+必要で、エイリアス定義に `--region` を入れていなかったため。
+
+`@Amazon Q alias list` で確認したところ、`--function-name` も `--invocation-type Event` も
+定義どおり保存されていた（実行時の表示が途中で切れていただけだった）。不足はリージョンのみ。
+CDK から `INVOKER_REGION`（`cdk.Aws.REGION`）を渡し、README と日次通知の案内に
+`--region` を含めるようにした。関数名とリージョンのどちらかが欠ける場合は、
+途中で入力を求められる不完全な案内を出さないよう、作成コマンド自体を省く。
+
+`--payload` の JSON は空白を含むため、`--region` はその前に置く。
+
+なお `@Amazon Q alias help` で、公式ドキュメントに記載のない
+`alias get` / `alias delete` が存在することも確認できた。作り直しは
+`@Amazon Q alias delete ops` を挟む。
+
+### README の手動実行例が多重実行を招く
+
+`aws lambda invoke` の例に `--cli-read-timeout` が無く、AWS CLI の既定 60 秒で
+タイムアウトしてリトライが走る。初回デプロイ時に中継 Lambda の boto3 クライアントで
+踏んだのと同じ罠を、README の手順側で再現していた。`--cli-read-timeout 0` を追加し、
+省略してはいけない理由も明記した。
+
 ## 2026-08-17: CDK スタックを関数ベースの定義に変更
 
 `cdk.Stack` のサブクラス + コンストラクタで定義する CDK の定番パターンをやめ、

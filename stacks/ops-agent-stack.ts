@@ -3,6 +3,7 @@ import * as cdk from "aws-cdk-lib/core";
 import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore";
 import * as chatbot from "aws-cdk-lib/aws-chatbot";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
+import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as scheduler from "aws-cdk-lib/aws-scheduler";
 import * as schedulerTargets from "aws-cdk-lib/aws-scheduler-targets";
@@ -21,6 +22,8 @@ export interface OpsAgentParameters {
   scoreThreshold: number;
   /** 調査対象の期間（時間） */
   lookbackHours: number;
+  /** Slack からの依頼で遡れる期間の上限（時間）。Logs Insights のスキャン量の歯止め */
+  maxLookbackHours: number;
   /** 監視対象リージョン。空配列ならデプロイ先リージョンのみ */
   targetRegions: string[];
   /** Slack ワークスペース ID（T で始まる）。channelId とセットで指定すると Slack 連携を作成 */
@@ -52,12 +55,18 @@ export function createOpsAgentStack(
     modelId,
     scoreThreshold,
     lookbackHours,
+    maxLookbackHours,
     targetRegions,
     slackWorkspaceId,
     slackChannelId,
   } = parameters;
 
   const stack = new cdk.Stack(scope, id, stackProps);
+
+  // 関数名は README と Slack の案内に実名で載せるため、自動生成に任せず決め打ちにする。
+  // 名前を文字列で持つことで、エージェント（Runtime）から中継 Lambda を参照せずに済み、
+  // Runtime → Lambda → Runtime の循環参照も避けられる
+  const invokerFunctionName = `${stack.stackName}-invoker`;
 
   // ---- 通知先の SNS トピック ----
   const topic = new sns.Topic(stack, "NotificationTopic", {
@@ -76,6 +85,11 @@ export function createOpsAgentStack(
       MODEL_ID: modelId,
       SCORE_THRESHOLD: String(scoreThreshold),
       LOOKBACK_HOURS: String(lookbackHours),
+      MAX_LOOKBACK_HOURS: String(maxLookbackHours),
+      // 日次通知に載せる依頼コマンドの案内で使う。Amazon Q Developer は
+      // リージョン未指定だと実行時に入力を求めてくるため、リージョンも渡す
+      INVOKER_FUNCTION_NAME: invokerFunctionName,
+      INVOKER_REGION: cdk.Aws.REGION,
       // コンテナ側の AWS_REGION に暗黙依存しないよう、未指定でも明示的に設定する
       TARGET_REGIONS:
         targetRegions.length > 0 ? targetRegions.join(",") : cdk.Aws.REGION,
@@ -88,7 +102,10 @@ export function createOpsAgentStack(
       "cloudwatch:DescribeAlarms",
       "cloudwatch:DescribeAlarmHistory",
       "cloudwatch:GetMetricStatistics",
+      "cloudwatch:ListMetrics",
       "logs:DescribeLogGroups",
+      "logs:DescribeLogStreams",
+      "logs:FilterLogEvents",
       "logs:StartQuery",
       "logs:GetQueryResults",
       "logs:StopQuery",
@@ -108,6 +125,7 @@ export function createOpsAgentStack(
   // ---- 中継 Lambda（Scheduler から起動され Runtime を同期呼び出しする） ----
   const invoker = new lambda.Function(stack, "InvokerFunction", {
     description: "EventBridge Scheduler から AgentCore Runtime を起動する中継 Lambda",
+    functionName: invokerFunctionName,
     runtime: lambda.Runtime.PYTHON_3_14,
     architecture: lambda.Architecture.ARM_64,
     handler: "handler.handler",
@@ -137,14 +155,39 @@ export function createOpsAgentStack(
 
   // ---- Slack 連携（任意） ----
   if (slackWorkspaceId && slackChannelId) {
-    new chatbot.SlackChannelConfiguration(stack, "SlackNotification", {
-      slackChannelConfigurationName: `${stack.stackName}-notifications`,
-      slackWorkspaceId,
-      slackChannelId,
-      notificationTopics: [topic],
-    });
+    // Slack から実行できる操作は中継 Lambda の起動だけに絞る。
+    // チャネルロールとガードレールの両方を明示しないと、ガードレールは
+    // AdministratorAccess が既定になってしまう
+    const invokeInvoker = () =>
+      new iam.PolicyStatement({
+        actions: ["lambda:InvokeFunction"],
+        resources: [invoker.functionArn],
+      });
+
+    const slack = new chatbot.SlackChannelConfiguration(
+      stack,
+      "SlackNotification",
+      {
+        slackChannelConfigurationName: `${stack.stackName}-notifications`,
+        slackWorkspaceId,
+        slackChannelId,
+        notificationTopics: [topic],
+        guardrailPolicies: [
+          new iam.ManagedPolicy(stack, "SlackCommandGuardrail", {
+            description:
+              "Slack から実行できる操作を運用エージェントの起動だけに限定する",
+            statements: [invokeInvoker()],
+          }),
+        ],
+      },
+    );
+    slack.addToRolePolicy(invokeInvoker());
   }
 
+  new cdk.CfnOutput(stack, "InvokerFunctionName", {
+    value: invokerFunctionName,
+    description: "手動実行と Slack のエイリアス作成で使う中継 Lambda の関数名",
+  });
   new cdk.CfnOutput(stack, "NotificationTopicArn", { value: topic.topicArn });
   new cdk.CfnOutput(stack, "AgentRuntimeArn", { value: runtime.agentRuntimeArn });
 

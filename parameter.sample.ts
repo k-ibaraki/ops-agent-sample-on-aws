@@ -14,6 +14,7 @@ export const parameters: OpsAgentParameters = {
   modelId: "jp.anthropic.claude-sonnet-4-6",
   scoreThreshold: 50,
   lookbackHours: 24,
+  maxLookbackHours: 168,
   targetRegions: [],
   // Slack 連携を使う場合はコメントを外して設定する
   // slackWorkspaceId: "TXXXXXXXX",

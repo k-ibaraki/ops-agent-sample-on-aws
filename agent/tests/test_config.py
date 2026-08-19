@@ -18,6 +18,9 @@ def test_必須項目とデフォルト値が反映される() -> None:
     assert config.target_regions == ("ap-northeast-1",)
     assert config.score_threshold == 50
     assert config.lookback_hours == 24
+    assert config.max_lookback_hours == 168
+    assert config.invoker_function_name == ""
+    assert config.invoker_region == ""
 
 
 def test_環境変数で上書きできる() -> None:
@@ -26,14 +29,27 @@ def test_環境変数で上書きできる() -> None:
         "TARGET_REGIONS": "ap-northeast-1, us-east-1,,",
         "SCORE_THRESHOLD": "70",
         "LOOKBACK_HOURS": "12",
+        "MAX_LOOKBACK_HOURS": "72",
+        "INVOKER_FUNCTION_NAME": "my-stack-invoker",
+        "INVOKER_REGION": "us-east-1",
     }
 
     config = Config.from_env(env)
+
+    assert config.invoker_function_name == "my-stack-invoker"
+    assert config.invoker_region == "us-east-1"
 
     assert config.model_id == "jp.anthropic.claude-haiku-4-5"
     assert config.target_regions == ("ap-northeast-1", "us-east-1")
     assert config.score_threshold == 70
     assert config.lookback_hours == 12
+    assert config.max_lookback_hours == 72
+
+
+def test_調査期間の上限は既定の調査期間を下回らない() -> None:
+    config = Config.from_env(BASE_ENV | {"LOOKBACK_HOURS": "48", "MAX_LOOKBACK_HOURS": "24"})
+
+    assert config.max_lookback_hours == 48
 
 
 def test_SNSトピック未設定はエラーになる() -> None:

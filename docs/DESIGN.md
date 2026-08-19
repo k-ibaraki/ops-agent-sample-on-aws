@@ -9,24 +9,29 @@
 過去 24 時間の CloudWatch（アラーム・ログ・メトリクス）を自律調査して、
 見つけた問題に 0〜100 点のスコアを付け、結果を SNS 経由で Slack に通知します。
 
+通知を受けた人は、その場で Slack から追加調査を依頼できます。依頼は同じ中継 Lambda を
+経由して同じエージェントに届き、回答は同じ Slack チャンネルに返ります。
+
 ![AWS 構成図](architecture.drawio.png)
 
-（構成図は draw.io の XML を埋め込んだ PNG です。draw.io で開くとそのまま編集できます）
+（構成図は draw.io の XML を埋め込んだ PNG です。draw.io で開くとそのまま編集できます。
+実線が毎朝の定期実行、破線が Slack からの追加調査依頼の経路です）
 
 ```
-EventBridge Scheduler (毎朝 8:00 JST)
-  → 中継 Lambda (Python)
-    → AgentCore Runtime (Strands Agents / Python)
-        ├─ CloudWatch 調査ツール群（アラーム / ログ / メトリクス、読み取り専用）
-        └─ 調査結果を採点 → SNS Publish
-          → Amazon Q Developer in chat applications (旧 AWS Chatbot) → Slack
+EventBridge Scheduler (毎朝 8:00 JST) ─┐
+                                       ├→ 中継 Lambda (Python)
+Slack からの依頼 (@Amazon Q run ops) ──┘     → AgentCore Runtime (Strands Agents / Python)
+                                                 ├─ CloudWatch 調査ツール群（読み取り専用）
+                                                 └─ 採点・整形 → SNS Publish
+                                                      → Amazon Q Developer in chat applications
+                                                        (旧 AWS Chatbot) → Slack
 ```
 
 ## 決定事項
 
 | # | 論点 | 決定 | 理由 |
 |---|------|------|------|
-| 1 | サンプルの型 | スケジュール起動の定期監視型のみ。Slack からの指示駆動型は README で拡張パスとして言及するに留める | スコープを小さく保ち、汎用サンプルとして完結させるため |
+| 1 | サンプルの型 | スケジュール起動の定期監視を軸に、Slack からの依頼で追加調査を行う指示駆動も持つ。ただしエージェントが行うのは調査と報告までで、実作業（書き込み系の操作）は行わない | 定期監視だけでは「気になった点をその場で掘る」運用に届かないため。書き込み権限を持たせないことで、インジェクションの実害経路は塞いだまま保つ |
 | 2 | 調査対象 | アラーム履歴 + ログ（Logs Insights）+ メトリクスの 3 種を専用ツールとしてエージェントに渡し、自律調査させる | エージェントによる自律的な深掘りをサンプルの見どころにするため |
 | 3 | ツールと IAM | boto3 の薄いラッパーを専用ツールとして実装し、IAM は読み取りに必要なアクションのみの最小権限 | public サンプルとして権限設計の手本を示すため |
 | 4 | デプロイ | すべて CDK（TypeScript）で完結。`aws_bedrockagentcore` の L2 construct（`Runtime` + `AgentRuntimeArtifact.fromAsset`）で Docker イメージをビルドしてデプロイ | `cdk deploy` 一発で環境が揃うようにするため |
@@ -43,6 +48,16 @@ EventBridge Scheduler (毎朝 8:00 JST)
 | 15 | ドキュメント | 日本語で統一 | 想定読者が国内のため |
 | 16 | CI | GitHub Actions 1 本（ruff / ty / pytest / tsc / jest / cdk synth） | public サンプルとしての最低限の品質保証 |
 | 17 | パラメータ管理 | 型付きの `parameter.ts` に集約（CDK context は使わない）。`parameter.sample.ts` をコミットし、実際の `parameter.ts` は gitignore | 型安全で編集箇所が明確になり、個人環境の値の誤コミットも防げるため |
+| 18 | Slack からの依頼の受け口 | Amazon Q Developer in chat applications のコマンドエイリアス `ops` から中継 Lambda を起動する（`@Amazon Q run ops "..."`。同じエイリアスは `--question "..."` の名前付き形式でも呼べる）。新規 Slack App は作らない | 決定 9 と同じく Slack のシークレット管理を不要に保ったまま、自由文の依頼を受けられるため。パラメータが 1 つなので、最短の位置引数を主な案内とする |
+| 19 | 依頼の起動方式 | エイリアスに `--invocation-type Event` を含め、既存の中継 Lambda を非同期起動する。受け口専用の Lambda は増やさない | 調査は数分かかり同期では返せないため。リソースを増やさず最小構成を保てるため |
+| 20 | 依頼への応答 | 非同期。結果は日次と同じ SNS トピック経由で同じ Slack チャンネルへ返す。専用の `AdhocReport`（Pydantic）で構造化出力を受け、整形は LLM を介さない通常のコード。調査が失敗した場合も失敗した旨を通知する | 通知経路を再利用でき追加インフラが不要なため。非同期のため、失敗を伝えないと依頼者が待ち続けるため |
+| 21 | 調査期間 | 全調査ツールに期間引数（`hours`）を追加。省略時は `lookbackHours`、上限は `maxLookbackHours`（デフォルト 168 時間 = 7 日）をコード側で強制する | 「先週からの傾向」のような依頼に応えつつ、Logs Insights のスキャン費用の暴走を防ぐため |
+| 22 | 調査ツールの追加 | `filter_log_events`・`describe_log_streams`・`list_metrics` の 3 種を追加（いずれも読み取り専用） | 生ログの前後関係とメトリクス名の確認ができず、深掘り依頼に答えきれないため |
+| 23 | Slack からのコマンド権限 | チャネルロールとガードレールポリシーの双方を、中継 Lambda に対する `lambda:InvokeFunction` だけに限定し、CDK で作成する | ガードレールは未指定だと AdministratorAccess が既定になるため。チャンネル参加者を信頼するモデルであることを構成として明示するため |
+| 24 | 会話の継続 | スコープ外。依頼のたびに独立したセッションで実行する | セッション管理と履歴保持が必要になり、サンプルの規模を大きく超えるため |
+| 25 | 依頼の多重実行 | 仕組みでは制限せず、コストの注意書きで補う | Amazon Q Developer の実行確認ボタンが事実上のワンクッションになるため |
+| 26 | 構造化出力の再試行 | `structured_output` の失敗は初回 + リトライ 2 回まで再試行する | モデルがツール呼び出しを返さず失敗することが実運用で発生したため。会話履歴は変更されないので再試行は安全 |
+| 27 | 中継 Lambda の関数名・リージョン | CDK の自動生成に任せず `<スタック名>-invoker` で固定し、エージェントには環境変数で名前とリージョンを渡す | 手動実行と Slack のエイリアス作成に必要な関数名を、README と日次通知の両方に実名で載せるため（利用者に調べさせない）。名前を文字列で持てば Runtime → Lambda の循環参照も避けられる。Amazon Q Developer はリージョン未指定だと実行時に入力を求めてくるため、リージョンも案内に含める |
 
 ## スコアリング方式
 

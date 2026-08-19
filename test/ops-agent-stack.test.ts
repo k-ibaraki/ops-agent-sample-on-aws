@@ -31,6 +31,7 @@ describe("OpsAgentStack", () => {
         MODEL_ID: "jp.anthropic.claude-sonnet-4-6",
         SCORE_THRESHOLD: "50",
         LOOKBACK_HOURS: "24",
+        MAX_LOOKBACK_HOURS: "168",
         SNS_TOPIC_ARN: Match.anyValue(),
         // targetRegions 未指定でもデプロイ先リージョンが明示的に設定される
         TARGET_REGIONS: { Ref: "AWS::Region" },
@@ -48,7 +49,10 @@ describe("OpsAgentStack", () => {
               "cloudwatch:DescribeAlarms",
               "cloudwatch:DescribeAlarmHistory",
               "cloudwatch:GetMetricStatistics",
+              "cloudwatch:ListMetrics",
               "logs:DescribeLogGroups",
+              "logs:DescribeLogStreams",
+              "logs:FilterLogEvents",
               "logs:StartQuery",
               "logs:GetQueryResults",
               "logs:StopQuery",
@@ -73,12 +77,29 @@ describe("OpsAgentStack", () => {
       Runtime: "python3.14",
       Handler: "handler.handler",
       Timeout: 900,
+      // 関数名は README と Slack の案内に実名で載せるため、自動生成に任せず決め打ちにする
+      FunctionName: "TestStack-invoker",
       Environment: {
         Variables: Match.objectLike({
           AGENT_RUNTIME_ARN: Match.anyValue(),
         }),
       },
     });
+  });
+
+  test("エージェントに中継 Lambda の関数名が渡される", () => {
+    // 依頼コマンドの案内を通知に実名で載せるために必要
+    template.hasResourceProperties("AWS::BedrockAgentCore::Runtime", {
+      EnvironmentVariables: Match.objectLike({
+        INVOKER_FUNCTION_NAME: "TestStack-invoker",
+        // Amazon Q Developer はリージョン未指定だと実行時に入力を求めてくる
+        INVOKER_REGION: { Ref: "AWS::Region" },
+      }),
+    });
+  });
+
+  test("中継 Lambda の関数名が出力される", () => {
+    template.hasOutput("InvokerFunctionName", { Value: "TestStack-invoker" });
   });
 
   test("中継 Lambda に InvokeAgentRuntime の権限が付与される", () => {
@@ -115,6 +136,8 @@ describe("OpsAgentStack", () => {
 
   test("デフォルトでは Slack 連携 (Chatbot) は作成されない", () => {
     template.resourceCountIs("AWS::Chatbot::SlackChannelConfiguration", 0);
+    // Slack からのコマンド実行を許可する管理ポリシーも作られない
+    template.resourceCountIs("AWS::IAM::ManagedPolicy", 0);
   });
 
   test("workspace/channel ID を指定すると Slack 連携が作成される", () => {
@@ -126,6 +149,47 @@ describe("OpsAgentStack", () => {
       SlackWorkspaceId: "T0123456789",
       SlackChannelId: "C0123456789",
       SnsTopicArns: Match.anyValue(),
+      // 未指定だと AdministratorAccess が既定になるため、必ず明示する
+      GuardrailPolicies: Match.anyValue(),
+    });
+  });
+
+  test("Slack から実行できるのは中継 Lambda の起動だけに絞られる", () => {
+    const withSlack = synth({
+      slackWorkspaceId: "T0123456789",
+      slackChannelId: "C0123456789",
+    });
+
+    // ガードレール（管理ポリシー）とチャネルロールの両方で同じ範囲に絞る
+    withSlack.hasResourceProperties("AWS::IAM::ManagedPolicy", {
+      PolicyDocument: Match.objectLike({
+        Statement: [
+          Match.objectLike({
+            Action: "lambda:InvokeFunction",
+            Effect: "Allow",
+            Resource: Match.anyValue(),
+          }),
+        ],
+      }),
+    });
+    withSlack.hasResourceProperties("AWS::IAM::Policy", {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: "lambda:InvokeFunction",
+            Effect: "Allow",
+            Resource: Match.anyValue(),
+          }),
+        ]),
+      }),
+      Roles: Match.anyValue(),
+    });
+  });
+
+  test("調査期間の上限は parameter.ts で設定できる", () => {
+    const custom = synth({ maxLookbackHours: 72 });
+    custom.hasResourceProperties("AWS::BedrockAgentCore::Runtime", {
+      EnvironmentVariables: Match.objectLike({ MAX_LOOKBACK_HOURS: "72" }),
     });
   });
 

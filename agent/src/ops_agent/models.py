@@ -31,3 +31,16 @@ class DailyReport(BaseModel):
             key=lambda f: f.score,
             reverse=True,
         )
+
+
+class AdhocReport(BaseModel):
+    """Slack から依頼されたアドホック調査への回答。"""
+
+    answer: str = Field(description="依頼への回答。結論を先に書き、根拠となる調査結果を続ける")
+    recommendations: list[str] = Field(
+        default_factory=list,
+        description="推奨される対応アクション。1要素1アクションで、番号は付けない",
+    )
+    findings: list[Finding] = Field(
+        default_factory=list, description="調査の過程で見つけた問題（あれば）"
+    )

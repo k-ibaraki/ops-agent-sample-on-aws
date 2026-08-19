@@ -26,15 +26,23 @@ def _create_client() -> Any:
     )
 
 
+def _build_payload(event: dict[str, Any]) -> dict[str, Any]:
+    """イベントからエージェントへ渡すペイロードを組み立てる。
+
+    依頼内容が空でも日次チェックには落とさない。空依頼を依頼者に伝えるには SNS 発行が
+    必要で、その権限を持つのはエージェント側だけのため、判定もエージェント側に任せる。
+    """
+    if event.get("trigger") != "adhoc":
+        return {"trigger": "scheduled", "time": event.get("time")}
+    return {"trigger": "adhoc", "message": str(event.get("message", ""))}
+
+
 def handler(event: dict[str, Any] | None, context: Any) -> dict[str, Any]:
     """AgentCore Runtime を同期呼び出しし、エージェントの応答を返す。"""
     agent_runtime_arn = os.environ["AGENT_RUNTIME_ARN"]
     qualifier = os.environ.get("QUALIFIER", "DEFAULT")
 
-    payload = json.dumps(
-        {"trigger": "scheduled", "time": (event or {}).get("time")},
-        ensure_ascii=False,
-    )
+    payload = json.dumps(_build_payload(event or {}), ensure_ascii=False)
     client = _create_client()
     response = client.invoke_agent_runtime(
         agentRuntimeArn=agent_runtime_arn,
