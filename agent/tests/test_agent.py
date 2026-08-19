@@ -140,6 +140,70 @@ def test_run_daily_checkは調査から通知までを実行する() -> None:
     assert "Lambda エラー率急増" in message["content"]["description"]
 
 
+def test_日次通知に中継Lambdaの実名が載る() -> None:
+    config = Config.from_env(
+        {
+            "SNS_TOPIC_ARN": CONFIG.sns_topic_arn,
+            "AWS_REGION": "ap-northeast-1",
+            "INVOKER_FUNCTION_NAME": "OpsAgentSampleOnAwsStack-invoker",
+        }
+    )
+    sns = FakeSns()
+
+    run_daily_check(config, agent=FakeAgent(), sns_client=sns)
+
+    description = json.loads(sns.publish_kwargs["Message"])["content"]["description"]
+    assert "OpsAgentSampleOnAwsStack-invoker" in description
+
+
+class FlakyStructuredOutputAgent(FakeAgent):
+    """指定回数だけ構造化出力に失敗するエージェント。"""
+
+    def __init__(self, failures: int, structured_result: Any = REPORT) -> None:
+        super().__init__(structured_result)
+        self.failures = failures
+
+    def structured_output(self, output_model: type, prompt: str) -> Any:
+        self.structured_output_calls.append((output_model, prompt))
+        if len(self.structured_output_calls) <= self.failures:
+            raise ValueError(
+                "No valid tool use or tool use input was found in the Bedrock response."
+            )
+        return self.structured_result
+
+
+def test_構造化出力は失敗しても再試行して成功する() -> None:
+    # モデルがツール呼び出しを返さないことが実際に起きたため、数回まで粘る
+    agent = FlakyStructuredOutputAgent(failures=2)
+
+    report = run_daily_check(CONFIG, agent=agent, sns_client=FakeSns())
+
+    assert report == REPORT
+    assert len(agent.structured_output_calls) == 3
+
+
+def test_構造化出力が繰り返し失敗したら例外を伝える() -> None:
+    agent = FlakyStructuredOutputAgent(failures=99)
+
+    with pytest.raises(ValueError):
+        run_daily_check(CONFIG, agent=agent, sns_client=FakeSns())
+
+    # 初回 + リトライ 2 回で打ち切る
+    assert len(agent.structured_output_calls) == 3
+
+
+def test_アドホック調査の構造化出力も再試行される() -> None:
+    agent = FlakyStructuredOutputAgent(failures=1, structured_result=ADHOC_REPORT)
+    sns = FakeSns()
+
+    report = run_adhoc_investigation(CONFIG, "調べて", agent=agent, sns_client=sns)
+
+    assert report == ADHOC_REPORT
+    assert len(agent.structured_output_calls) == 2
+    # 再試行で成功したので失敗通知は出ない
+    assert "失敗" not in json.loads(sns.publish_kwargs["Message"])["content"]["title"]
+
+
 def test_アドホック回答の書式スキルの定義が存在する() -> None:
     skill_md = SKILLS_DIR / "adhoc-report-style" / "SKILL.md"
 

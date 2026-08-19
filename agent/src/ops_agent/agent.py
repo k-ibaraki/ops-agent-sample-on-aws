@@ -4,6 +4,7 @@
 整形・通知は通常のコードで行う。
 """
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -23,8 +24,13 @@ from ops_agent.report import (
     build_notification,
 )
 
+logger = logging.getLogger(__name__)
+
 # レポート文面の書式ルールを Strands の Skills 機能で渡す（配下のスキルをすべて読み込む）
 SKILLS_DIR = Path(__file__).parent / "skills"
+
+# 構造化出力はモデルがツール呼び出しを返さず失敗することがあるため、初回 + リトライ 2 回まで試す
+STRUCTURED_OUTPUT_ATTEMPTS = 3
 
 
 class InvestigatorAgent(Protocol):
@@ -132,7 +138,8 @@ def run_daily_check(
         sns_client = boto3.client("sns")
 
     agent(build_investigation_prompt(config))
-    report = agent.structured_output(
+    report = _structured_output(
+        agent,
         DailyReport,
         "ここまでの調査結果を DailyReport にまとめてください。"
         "問題ごとに採点基準に沿ったスコアを付けてください。"
@@ -140,10 +147,31 @@ def run_daily_check(
     )
 
     notification = build_notification(
-        report, threshold=config.score_threshold, generated_at=datetime.now(UTC)
+        report,
+        threshold=config.score_threshold,
+        generated_at=datetime.now(UTC),
+        invoker_function_name=config.invoker_function_name,
     )
     publish_notification(sns_client, topic_arn=config.sns_topic_arn, notification=notification)
     return report
+
+
+def _structured_output[T: BaseModel](
+    agent: InvestigatorAgent, output_model: type[T], prompt: str
+) -> T:
+    """構造化出力を取得する。失敗は再試行する（会話履歴は変更されないため安全）。"""
+    for attempt in range(1, STRUCTURED_OUTPUT_ATTEMPTS):
+        try:
+            return agent.structured_output(output_model, prompt)
+        except Exception as exc:
+            logger.warning(
+                "構造化出力に失敗したため再試行します（%d/%d 回目）: %s",
+                attempt,
+                STRUCTURED_OUTPUT_ATTEMPTS,
+                exc,
+            )
+    # 最後の 1 回は失敗をそのまま呼び出し元へ伝える
+    return agent.structured_output(output_model, prompt)
 
 
 def _publish_failure(sns_client: Any, config: Config, question: str, error: str) -> None:
@@ -179,7 +207,8 @@ def run_adhoc_investigation(
         if agent is None:
             agent = build_agent(config)
         agent(build_adhoc_prompt(config, question))
-        report = agent.structured_output(
+        report = _structured_output(
+            agent,
             AdhocReport,
             "ここまでの調査結果を AdhocReport にまとめてください。"
             "文面は adhoc-report-style スキルを読み込み、その書式ルールに従って書いてください。",

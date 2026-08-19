@@ -18,6 +18,8 @@ class Config:
     score_threshold: int
     lookback_hours: int
     max_lookback_hours: int
+    # 通知に載せる依頼コマンドの案内に使う。未設定なら案内を省く
+    invoker_function_name: str
 
     DEFAULT_SCORE_THRESHOLD: ClassVar[int] = 50
     DEFAULT_LOOKBACK_HOURS: ClassVar[int] = 24
@@ -53,4 +55,5 @@ class Config:
             lookback_hours=lookback_hours,
             # 上限が既定の調査期間を下回ると日次チェックの期間まで縮んでしまう
             max_lookback_hours=max(max_lookback_hours, lookback_hours),
+            invoker_function_name=env.get("INVOKER_FUNCTION_NAME", "").strip(),
         )

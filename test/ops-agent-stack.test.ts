@@ -77,12 +77,27 @@ describe("OpsAgentStack", () => {
       Runtime: "python3.14",
       Handler: "handler.handler",
       Timeout: 900,
+      // 関数名は README と Slack の案内に実名で載せるため、自動生成に任せず決め打ちにする
+      FunctionName: "TestStack-invoker",
       Environment: {
         Variables: Match.objectLike({
           AGENT_RUNTIME_ARN: Match.anyValue(),
         }),
       },
     });
+  });
+
+  test("エージェントに中継 Lambda の関数名が渡される", () => {
+    // 依頼コマンドの案内を通知に実名で載せるために必要
+    template.hasResourceProperties("AWS::BedrockAgentCore::Runtime", {
+      EnvironmentVariables: Match.objectLike({
+        INVOKER_FUNCTION_NAME: "TestStack-invoker",
+      }),
+    });
+  });
+
+  test("中継 Lambda の関数名が出力される", () => {
+    template.hasOutput("InvokerFunctionName", { Value: "TestStack-invoker" });
   });
 
   test("中継 Lambda に InvokeAgentRuntime の権限が付与される", () => {

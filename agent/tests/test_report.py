@@ -179,6 +179,40 @@ def test_依頼例は本文が長くても切り詰められない() -> None:
     assert len(description) <= MAX_DESCRIPTION_CHARS
 
 
+def test_関数名を渡すと初回のエイリアス作成コマンドも載る() -> None:
+    # 依頼方法だけ載せても、エイリアス未作成の人は実行できない
+    report = DailyReport(overall_summary="異常なし", findings=[])
+
+    notification = build_notification(
+        report,
+        threshold=50,
+        generated_at=GENERATED_AT,
+        invoker_function_name="OpsAgentSampleOnAwsStack-invoker",
+    )
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert "alias create ops" in description
+    # 関数名は実物を載せる（利用者に調べさせない）
+    assert "--function-name OpsAgentSampleOnAwsStack-invoker" in description
+    assert "--invocation-type Event" in description
+    assert '"trigger": "adhoc"' in description
+
+
+def test_エイリアス作成コマンドも本文が長いとき切り詰められない() -> None:
+    report = DailyReport(overall_summary="x" * (MAX_DESCRIPTION_CHARS * 2), findings=[])
+
+    notification = build_notification(
+        report,
+        threshold=50,
+        generated_at=GENERATED_AT,
+        invoker_function_name="OpsAgentSampleOnAwsStack-invoker",
+    )
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert "alias create ops" in description
+    assert len(description) <= MAX_DESCRIPTION_CHARS
+
+
 def test_アドホック回答は依頼内容と回答を含む() -> None:
     report = AdhocReport(
         answer="my-api-function のエラーは依存先のタイムアウトが原因です",

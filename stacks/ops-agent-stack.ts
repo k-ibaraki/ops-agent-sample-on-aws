@@ -63,6 +63,11 @@ export function createOpsAgentStack(
 
   const stack = new cdk.Stack(scope, id, stackProps);
 
+  // 関数名は README と Slack の案内に実名で載せるため、自動生成に任せず決め打ちにする。
+  // 名前を文字列で持つことで、エージェント（Runtime）から中継 Lambda を参照せずに済み、
+  // Runtime → Lambda → Runtime の循環参照も避けられる
+  const invokerFunctionName = `${stack.stackName}-invoker`;
+
   // ---- 通知先の SNS トピック ----
   const topic = new sns.Topic(stack, "NotificationTopic", {
     displayName: "ops-agent 日次ヘルスチェック通知",
@@ -81,6 +86,8 @@ export function createOpsAgentStack(
       SCORE_THRESHOLD: String(scoreThreshold),
       LOOKBACK_HOURS: String(lookbackHours),
       MAX_LOOKBACK_HOURS: String(maxLookbackHours),
+      // 日次通知に載せる依頼コマンドの案内で使う
+      INVOKER_FUNCTION_NAME: invokerFunctionName,
       // コンテナ側の AWS_REGION に暗黙依存しないよう、未指定でも明示的に設定する
       TARGET_REGIONS:
         targetRegions.length > 0 ? targetRegions.join(",") : cdk.Aws.REGION,
@@ -116,6 +123,7 @@ export function createOpsAgentStack(
   // ---- 中継 Lambda（Scheduler から起動され Runtime を同期呼び出しする） ----
   const invoker = new lambda.Function(stack, "InvokerFunction", {
     description: "EventBridge Scheduler から AgentCore Runtime を起動する中継 Lambda",
+    functionName: invokerFunctionName,
     runtime: lambda.Runtime.PYTHON_3_14,
     architecture: lambda.Architecture.ARM_64,
     handler: "handler.handler",
@@ -174,6 +182,10 @@ export function createOpsAgentStack(
     slack.addToRolePolicy(invokeInvoker());
   }
 
+  new cdk.CfnOutput(stack, "InvokerFunctionName", {
+    value: invokerFunctionName,
+    description: "手動実行と Slack のエイリアス作成で使う中継 Lambda の関数名",
+  });
   new cdk.CfnOutput(stack, "NotificationTopicArn", { value: topic.topicArn });
   new cdk.CfnOutput(stack, "AgentRuntimeArn", { value: runtime.agentRuntimeArn });
 

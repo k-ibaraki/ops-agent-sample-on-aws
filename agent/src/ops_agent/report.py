@@ -22,8 +22,8 @@ MAX_ERROR_CHARS = 500
 # 問題同士の境目を示す区切り線
 DIVIDER = "─" * 24
 
-# 追加調査の依頼方法。README のコマンドエイリアス作成手順と対になっている
-ADHOC_HINT = '*💬 追加調査を依頼できます*\n`@Amazon Q run ops "調べたい内容"`'
+# Slack のコマンドエイリアス名。README の作成手順と対になっている
+ALIAS_NAME = "ops"
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,26 @@ def _question_text(question: str) -> str:
 def _one_line(text: str) -> str:
     """件名に使えるよう、改行と連続空白を潰して1行にする。"""
     return " ".join(text.split())
+
+
+def build_adhoc_hint(invoker_function_name: str = "") -> str:
+    """日次通知の末尾に載せる、追加調査の依頼方法。
+
+    エイリアスは Slack のチャンネルごとの設定で CDK の管理外のため、未作成の人でも
+    そのまま実行できるよう、関数名を実名で埋めた作成コマンドも併記する。
+    """
+    lines = [
+        "*💬 追加調査を依頼できます*",
+        f'`@Amazon Q run {ALIAS_NAME} "調べたい内容"`',
+    ]
+    if invoker_function_name:
+        lines += [
+            "初回のみ、次のコマンドでエイリアスを作成してください",
+            f"`@Amazon Q alias create {ALIAS_NAME} lambda invoke "
+            f"--function-name {invoker_function_name} --invocation-type Event "
+            f'--payload {{"trigger": "adhoc", "message": "$question"}}`',
+        ]
+    return "\n".join(lines)
 
 
 def _custom_notification(title: str, description: str, subject: str) -> Notification:
@@ -93,7 +113,11 @@ def _format_notable(finding: Finding) -> str:
 
 
 def build_notification(
-    report: DailyReport, *, threshold: int, generated_at: datetime
+    report: DailyReport,
+    *,
+    threshold: int,
+    generated_at: datetime,
+    invoker_function_name: str = "",
 ) -> Notification:
     """日次レポートからカスタム通知形式の SNS メッセージを組み立てる。"""
     date_str = generated_at.astimezone(JST).strftime("%Y-%m-%d")
@@ -122,10 +146,11 @@ def build_notification(
         sections.append(f"*📋 その他の検出事項（{threshold} 点未満）*\n{lines}")
 
     # 依頼例が切り詰めで消えないよう、本文を先に縮めてから連結する
-    body = _clip("\n\n".join(sections), MAX_DESCRIPTION_CHARS - len(ADHOC_HINT) - 2)
+    hint = build_adhoc_hint(invoker_function_name)
+    body = _clip("\n\n".join(sections), MAX_DESCRIPTION_CHARS - len(hint) - 2)
     return _custom_notification(
         title=title,
-        description=f"{body}\n\n{ADHOC_HINT}",
+        description=f"{body}\n\n{hint}",
         subject=f"[ops-agent] 日次ヘルスチェック {date_str}: {subject_state}",
     )
 
