@@ -77,16 +77,16 @@ export const parameters: OpsAgentParameters = {
 
 ID を設定しない場合は SNS トピックまで作成されるので、メール購読などでも動作確認できます。
 
-なお日次通知の末尾には、後述する追加調査の依頼例が常に載ります。メール購読で使う場合や、依頼機能を使わない場合は、`agent/src/ops_agent/report.py` の `ADHOC_HINT` を編集または削除してください。
+なお日次通知の末尾には、後述する追加調査の依頼例が常に載ります。メール購読で使う場合や、依頼機能を使わない場合は、`agent/src/ops_agent/report.py` の `build_adhoc_hint()` を編集または削除してください。
 
 ### Slack から追加調査を依頼できるようにする（任意）
 
 Slack 連携を設定してデプロイすると、チャンネルから中継 Lambda を起動する権限（対象は中継 Lambda のみ）が付きます。あとはチャンネルで一度だけコマンドエイリアスを作れば、自由文で調査を依頼できます。
 
-エイリアスはチャンネルごとの設定で CDK の管理外のため、Slack 上で作成します。関数名は `OpsAgentSampleOnAwsStack-invoker` 固定です（スタック名を変えた場合は `<スタック名>-invoker`。`pnpm cdk deploy` の出力 `InvokerFunctionName` にも表示されます）。
+エイリアスはチャンネルごとの設定で CDK の管理外のため、Slack 上で作成します。関数名は `OpsAgentOnAwsStack-invoker` 固定です（スタック名を変えた場合は `<スタック名>-invoker`。`pnpm cdk deploy` の出力 `InvokerFunctionName` にも表示されます）。
 
 ```
-@Amazon Q alias create ops lambda invoke --function-name OpsAgentSampleOnAwsStack-invoker --invocation-type Event --payload {"trigger": "adhoc", "message": "$question"}
+@Amazon Q alias create ops lambda invoke --function-name OpsAgentOnAwsStack-invoker --invocation-type Event --payload {"trigger": "adhoc", "message": "$question"}
 ```
 
 このコマンドは日次通知の末尾にも実名入りで載るので、通知からコピーしても構いません。
@@ -126,7 +126,7 @@ Slack 連携を設定してデプロイすると、チャンネルから中継 L
 
 ```sh
 aws lambda invoke \
-  --function-name OpsAgentSampleOnAwsStack-invoker \
+  --function-name OpsAgentOnAwsStack-invoker \
   --cli-read-timeout 0 \
   --cli-binary-format raw-in-base64-out \
   --payload '{}' /dev/stdout
