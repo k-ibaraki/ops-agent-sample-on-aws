@@ -86,8 +86,10 @@ export function createOpsAgentStack(
       SCORE_THRESHOLD: String(scoreThreshold),
       LOOKBACK_HOURS: String(lookbackHours),
       MAX_LOOKBACK_HOURS: String(maxLookbackHours),
-      // 日次通知に載せる依頼コマンドの案内で使う
+      // 日次通知に載せる依頼コマンドの案内で使う。Amazon Q Developer は
+      // リージョン未指定だと実行時に入力を求めてくるため、リージョンも渡す
       INVOKER_FUNCTION_NAME: invokerFunctionName,
+      INVOKER_REGION: cdk.Aws.REGION,
       // コンテナ側の AWS_REGION に暗黙依存しないよう、未指定でも明示的に設定する
       TARGET_REGIONS:
         targetRegions.length > 0 ? targetRegions.join(",") : cdk.Aws.REGION,

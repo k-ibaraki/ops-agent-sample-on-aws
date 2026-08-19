@@ -218,6 +218,24 @@ README のエイリアス作成手順と手動実行例が `<InvokerFunction の
 循環参照を避けている。日次通知の末尾には、依頼コマンドに加えて初回のエイリアス作成
 コマンドも実名入りで載せ、通知からコピーするだけで使い始められるようにした。
 
+### Slack でエイリアスを実行したらリージョンを聞かれた
+
+実際に Slack でエイリアスを作って実行したところ、Amazon Q Developer が
+「Enter a value for `region`」と入力を求めてきた。CLI コマンドの実行にはリージョンが
+必要で、エイリアス定義に `--region` を入れていなかったため。
+
+`@Amazon Q alias list` で確認したところ、`--function-name` も `--invocation-type Event` も
+定義どおり保存されていた（実行時の表示が途中で切れていただけだった）。不足はリージョンのみ。
+CDK から `INVOKER_REGION`（`cdk.Aws.REGION`）を渡し、README と日次通知の案内に
+`--region` を含めるようにした。関数名とリージョンのどちらかが欠ける場合は、
+途中で入力を求められる不完全な案内を出さないよう、作成コマンド自体を省く。
+
+`--payload` の JSON は空白を含むため、`--region` はその前に置く。
+
+なお `@Amazon Q alias help` で、公式ドキュメントに記載のない
+`alias get` / `alias delete` が存在することも確認できた。作り直しは
+`@Amazon Q alias delete ops` を挟む。
+
 ### README の手動実行例が多重実行を招く
 
 `aws lambda invoke` の例に `--cli-read-timeout` が無く、AWS CLI の既定 60 秒で

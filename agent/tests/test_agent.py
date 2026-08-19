@@ -145,7 +145,8 @@ def test_日次通知に中継Lambdaの実名が載る() -> None:
         {
             "SNS_TOPIC_ARN": CONFIG.sns_topic_arn,
             "AWS_REGION": "ap-northeast-1",
-            "INVOKER_FUNCTION_NAME": "OpsAgentSampleOnAwsStack-invoker",
+            "INVOKER_FUNCTION_NAME": "OpsAgentOnAwsStack-invoker",
+            "INVOKER_REGION": "ap-northeast-1",
         }
     )
     sns = FakeSns()
@@ -153,7 +154,8 @@ def test_日次通知に中継Lambdaの実名が載る() -> None:
     run_daily_check(config, agent=FakeAgent(), sns_client=sns)
 
     description = json.loads(sns.publish_kwargs["Message"])["content"]["description"]
-    assert "OpsAgentSampleOnAwsStack-invoker" in description
+    assert "--function-name OpsAgentOnAwsStack-invoker" in description
+    assert "--region ap-northeast-1" in description
 
 
 class FlakyStructuredOutputAgent(FakeAgent):

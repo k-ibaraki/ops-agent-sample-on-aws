@@ -151,6 +151,7 @@ def run_daily_check(
         threshold=config.score_threshold,
         generated_at=datetime.now(UTC),
         invoker_function_name=config.invoker_function_name,
+        invoker_region=config.invoker_region,
     )
     publish_notification(sns_client, topic_arn=config.sns_topic_arn, notification=notification)
     return report

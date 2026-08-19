@@ -86,10 +86,21 @@ Slack 連携を設定してデプロイすると、チャンネルから中継 L
 エイリアスはチャンネルごとの設定で CDK の管理外のため、Slack 上で作成します。関数名は `OpsAgentOnAwsStack-invoker` 固定です（スタック名を変えた場合は `<スタック名>-invoker`。`pnpm cdk deploy` の出力 `InvokerFunctionName` にも表示されます）。
 
 ```
-@Amazon Q alias create ops lambda invoke --function-name OpsAgentOnAwsStack-invoker --invocation-type Event --payload {"trigger": "adhoc", "message": "$question"}
+@Amazon Q alias create ops lambda invoke --function-name OpsAgentOnAwsStack-invoker --region ap-northeast-1 --invocation-type Event --payload {"trigger": "adhoc", "message": "$question"}
 ```
 
 このコマンドは日次通知の末尾にも実名入りで載るので、通知からコピーしても構いません。
+
+`--region` は省略しないでください。Amazon Q Developer は CLI コマンドの実行にリージョンを
+必要とし、指定がないと実行のたびに入力を求められます。デプロイ先が東京以外の場合は
+そのリージョンに読み替えてください。また `--payload` の JSON は空白を含むため、必ず
+他の引数より後ろに置いてください。
+
+作成済みのエイリアスを作り直す場合は、先に削除します。
+
+```
+@Amazon Q alias delete ops
+```
 
 作成後は次のように依頼します。依頼文は空白を含むためクォートで括ってください。
 

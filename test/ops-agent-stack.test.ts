@@ -92,6 +92,8 @@ describe("OpsAgentStack", () => {
     template.hasResourceProperties("AWS::BedrockAgentCore::Runtime", {
       EnvironmentVariables: Match.objectLike({
         INVOKER_FUNCTION_NAME: "TestStack-invoker",
+        // Amazon Q Developer はリージョン未指定だと実行時に入力を求めてくる
+        INVOKER_REGION: { Ref: "AWS::Region" },
       }),
     });
   });

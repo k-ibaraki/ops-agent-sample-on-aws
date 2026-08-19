@@ -187,15 +187,36 @@ def test_関数名を渡すと初回のエイリアス作成コマンドも載�
         report,
         threshold=50,
         generated_at=GENERATED_AT,
-        invoker_function_name="OpsAgentSampleOnAwsStack-invoker",
+        invoker_function_name="OpsAgentOnAwsStack-invoker",
+        invoker_region="ap-northeast-1",
     )
     description = json.loads(notification.message)["content"]["description"]
 
     assert "alias create ops" in description
     # 関数名は実物を載せる（利用者に調べさせない）
-    assert "--function-name OpsAgentSampleOnAwsStack-invoker" in description
+    assert "--function-name OpsAgentOnAwsStack-invoker" in description
     assert "--invocation-type Event" in description
     assert '"trigger": "adhoc"' in description
+    # リージョン未指定だと Amazon Q Developer が実行時に入力を求めてくる
+    assert "--region ap-northeast-1" in description
+    # JSON は空白を含むため、--payload は必ず最後に置く
+    assert description.index("--region") < description.index("--payload")
+
+
+def test_リージョンが不明ならエイリアス作成コマンドは載せない() -> None:
+    # 不完全な作成コマンドを載せると、実行時に入力を求められて詰まる
+    report = DailyReport(overall_summary="異常なし", findings=[])
+
+    notification = build_notification(
+        report,
+        threshold=50,
+        generated_at=GENERATED_AT,
+        invoker_function_name="OpsAgentOnAwsStack-invoker",
+    )
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert "alias create" not in description
+    assert "@Amazon Q run ops" in description
 
 
 def test_エイリアス作成コマンドも本文が長いとき切り詰められない() -> None:
@@ -205,7 +226,8 @@ def test_エイリアス作成コマンドも本文が長いとき切り詰め�
         report,
         threshold=50,
         generated_at=GENERATED_AT,
-        invoker_function_name="OpsAgentSampleOnAwsStack-invoker",
+        invoker_function_name="OpsAgentOnAwsStack-invoker",
+        invoker_region="ap-northeast-1",
     )
     description = json.loads(notification.message)["content"]["description"]
 

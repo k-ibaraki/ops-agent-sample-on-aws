@@ -48,21 +48,24 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def build_adhoc_hint(invoker_function_name: str = "") -> str:
+def build_adhoc_hint(invoker_function_name: str = "", invoker_region: str = "") -> str:
     """日次通知の末尾に載せる、追加調査の依頼方法。
 
     エイリアスは Slack のチャンネルごとの設定で CDK の管理外のため、未作成の人でも
-    そのまま実行できるよう、関数名を実名で埋めた作成コマンドも併記する。
+    そのまま実行できるよう、関数名とリージョンを実名で埋めた作成コマンドも併記する。
+    どちらかが不明なときは、途中で入力を求められる不完全な案内を出さない。
     """
     lines = [
         "*💬 追加調査を依頼できます*",
         f'`@Amazon Q run {ALIAS_NAME} "調べたい内容"`',
     ]
-    if invoker_function_name:
+    if invoker_function_name and invoker_region:
         lines += [
             "初回のみ、次のコマンドでエイリアスを作成してください",
+            # --payload の JSON は空白を含むため、他の引数より後ろに置く
             f"`@Amazon Q alias create {ALIAS_NAME} lambda invoke "
-            f"--function-name {invoker_function_name} --invocation-type Event "
+            f"--function-name {invoker_function_name} --region {invoker_region} "
+            f"--invocation-type Event "
             f'--payload {{"trigger": "adhoc", "message": "$question"}}`',
         ]
     return "\n".join(lines)
@@ -118,6 +121,7 @@ def build_notification(
     threshold: int,
     generated_at: datetime,
     invoker_function_name: str = "",
+    invoker_region: str = "",
 ) -> Notification:
     """日次レポートからカスタム通知形式の SNS メッセージを組み立てる。"""
     date_str = generated_at.astimezone(JST).strftime("%Y-%m-%d")
@@ -146,7 +150,7 @@ def build_notification(
         sections.append(f"*📋 その他の検出事項（{threshold} 点未満）*\n{lines}")
 
     # 依頼例が切り詰めで消えないよう、本文を先に縮めてから連結する
-    hint = build_adhoc_hint(invoker_function_name)
+    hint = build_adhoc_hint(invoker_function_name, invoker_region)
     body = _clip("\n\n".join(sections), MAX_DESCRIPTION_CHARS - len(hint) - 2)
     return _custom_notification(
         title=title,
