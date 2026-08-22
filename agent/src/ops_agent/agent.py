@@ -49,7 +49,9 @@ class InvestigatorAgent(Protocol):
 
 
 def build_agent(config: Config) -> Agent:
-    """CloudWatch 調査ツールと書式スキルを持つ Strands エージェントを組み立てる。"""
+    """CloudWatch 調査ツールと skills/ 配下のスキル
+    （調査方針・採点基準・レポート書式）を持つ Strands エージェントを組み立てる。
+    """
     return Agent(
         model=BedrockModel(model_id=config.model_id),
         system_prompt=build_system_prompt(config),
