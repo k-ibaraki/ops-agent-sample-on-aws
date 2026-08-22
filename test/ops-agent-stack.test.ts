@@ -193,6 +193,29 @@ describe("OpsAgentStack", () => {
     });
   });
 
+  test("中継 Lambda のエラーを拾うアラームが SNS に通知する", () => {
+    // エージェント側で捕捉できない失敗（コンテナ障害・タイムアウト）に気づくための網
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "AWS/Lambda",
+      MetricName: "Errors",
+      Statistic: "Sum",
+      Period: 300,
+      EvaluationPeriods: 1,
+      Threshold: 1,
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      // エラーが無い時間帯は「データなし」になるため、欠損を異常と見なさない
+      TreatMissingData: "notBreaching",
+      AlarmActions: Match.anyValue(),
+    });
+  });
+
+  test("アラームは復旧時には通知しない", () => {
+    // 翌日の日次通知が届けば復旧は分かるため、OK 遷移の通知は増やさない
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      OKActions: Match.absent(),
+    });
+  });
+
   test("監視対象リージョンは parameter.ts で設定できる", () => {
     const multi = synth({ targetRegions: ["ap-northeast-1", "us-east-1"] });
     multi.hasResourceProperties("AWS::BedrockAgentCore::Runtime", {

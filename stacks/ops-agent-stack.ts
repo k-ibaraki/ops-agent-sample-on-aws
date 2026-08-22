@@ -2,6 +2,8 @@ import * as path from "node:path";
 import * as cdk from "aws-cdk-lib/core";
 import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore";
 import * as chatbot from "aws-cdk-lib/aws-chatbot";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
+import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
@@ -142,6 +144,26 @@ export function createOpsAgentStack(
   runtime.grantInvokeRuntime(invoker);
   // リトライによるエージェントの多重実行（重複通知）を防ぐ
   invoker.configureAsyncInvoke({ retryAttempts: 0 });
+
+  // ---- 失敗に気づくためのアラーム ----
+  // エージェントは自分で捕捉できた失敗を Slack へ通知して正常終了する。
+  // ここで拾うのは、コンテナ障害やタイムアウトなど通知すら出せなかった失敗だけ
+  const invokerErrorAlarm = new cloudwatch.Alarm(stack, "InvokerErrorAlarm", {
+    alarmDescription:
+      "運用エージェントの起動に失敗しました（エージェント側で通知できなかった失敗）",
+    metric: invoker.metricErrors({
+      period: cdk.Duration.minutes(5),
+      statistic: "Sum",
+    }),
+    threshold: 1,
+    evaluationPeriods: 1,
+    comparisonOperator:
+      cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+    // 実行は日次 1 回と依頼のときだけで、エラーが無い時間帯はデータ自体が無い
+    treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+  });
+  // 復旧は翌日の日次通知が届くことで分かるため、OK 遷移の通知は付けない
+  invokerErrorAlarm.addAlarmAction(new cloudwatchActions.SnsAction(topic));
 
   // ---- 毎朝の定期実行 ----
   new scheduler.Schedule(stack, "DailySchedule", {
