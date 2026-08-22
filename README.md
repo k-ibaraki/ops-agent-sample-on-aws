@@ -18,7 +18,7 @@ AWS アカウントの日次ヘルスチェックを行う運用エージェン�
 
 - エージェントには CloudWatch の調査ツール（boto3 の薄いラッパー、読み取り専用）だけを渡し、どこをどう深掘りするかはエージェント自身が判断します
 - 採点結果は Pydantic モデルの構造化出力で受け取り、通知メッセージの整形と SNS 発行は LLM を介さない通常のコードで行います
-- レポート文面の書式（改行・箇条書き・文体）は [Strands の Skills 機能](https://strandsagents.com/docs/user-guide/concepts/plugins/skills/) で定義しています（`agent/src/ops_agent/skills/` 配下の SKILL.md）
+- 調査の方針・採点基準・レポート文面の書式は [Strands の Skills 機能](https://strandsagents.com/docs/user-guide/concepts/plugins/skills/) で定義しています（`agent/src/ops_agent/skills/` 配下の SKILL.md）
 - 問題ゼロの日も「異常なし」のサマリを毎日 1 通送るため、通知が来ないこととエージェントの停止を区別できます
 - Slack からの依頼も同じ中継 Lambda・同じエージェントを通り、回答は同じチャンネルに返ります。エージェントが行うのは調査と報告までで、書き込み系の操作は行いません
 

@@ -89,7 +89,7 @@ def _custom_notification(title: str, description: str, subject: str) -> Notifica
 
 
 def _severity_emoji(score: int) -> str:
-    """スコア帯（システムプロンプトの採点基準と対応）を絵文字で表す。"""
+    """スコア帯（scoring-rubric スキルの採点基準と対応）を絵文字で表す。"""
     if score >= 90:
         return "🔴"
     if score >= 70:

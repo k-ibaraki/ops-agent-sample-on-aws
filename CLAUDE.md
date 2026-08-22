@@ -89,7 +89,8 @@ LLM に任せる範囲を意図的に絞っている。この分離はセキュ�
 - **LLM が扱うのは調査と採点だけ**: `agent.py` の `run_daily_check()` / `run_adhoc_investigation()` が「調査（自律ツール使用）→ `structured_output()` で `DailyReport` / `AdhocReport`（Pydantic、`models.py`）に結果を受け取る」を実行する
 - **通知の整形と SNS 発行は LLM を介さない通常のコード**: `report.py`（Amazon Q Developer カスタム通知形式への整形、JST 変換）と `notifier.py`。純粋関数なのでテスト可能。Slack への回答に載る依頼文は、LLM の出力ではなく受け取った文字列をそのまま使う
 - **ツールは読み取り専用のみ**: `aws_tools.py` は boto3 の薄いラッパー 8 種。対象リージョンを `Config.target_regions` の許可リストで検証し、調査期間は `Config.max_lookback_hours` で頭打ちにする（`_resolve_hours()` が唯一の経路）。書き込み系の権限・ツールをエージェントに追加しない方針
-- **レポート文面の書式は Strands Skills で誘導**: `skills/` 配下（`slack-report-style` / `adhoc-report-style`）。`AgentSkills` には `skills/` ごと渡して両方読み込ませる
+- **静的な方針・基準は Strands Skills で誘導**: `skills/` 配下の 4 スキル（調査の方針・手順 = `investigation-policy`、採点基準 = `scoring-rubric`、レポート書式 = `slack-report-style` / `adhoc-report-style`）。`AgentSkills` には `skills/` ごと渡してすべて読み込ませる。スキル本文は保証注入ではないため、読み込みはプロンプト側で明示指示する
+- **プロンプトの組み立ては `prompts.py` に集約**: 設定値の埋め込み・スキルの読み込み指示・インジェクション対策のガード文言など、必ずモデルに届けたい要素はスキルではなくここに置く（`agent.py` はオーケストレーション専任）
 - **Slack からの依頼は非同期なので失敗も必ず通知する**: `run_adhoc_investigation()` は例外時に失敗通知を発行してから再送出する（依頼者を待たせ続けないため）
 - **設定は環境変数経由**: `config.py` の `Config.from_env()`。環境変数は CDK スタック（`stacks/ops-agent-stack.ts` の `environmentVariables`）が設定するため、設定項目の追加時は両側の変更が必要
 - **時刻の扱い**: 調査・推論は UTC のまま、最終レポートは JST 変換して「JST」を明記（システムプロンプトと `report.py` の両方に規定がある）
