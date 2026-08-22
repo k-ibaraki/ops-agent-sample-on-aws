@@ -340,3 +340,30 @@ def test_日次の失敗通知はエラー内容を切り詰める() -> None:
     description = json.loads(notification.message)["content"]["description"]
 
     assert len(description) <= MAX_DESCRIPTION_CHARS
+
+
+def test_日次の失敗通知に手動で再実行するコマンドが載る() -> None:
+    notification = build_daily_failure_notification(
+        error="失敗",
+        generated_at=GENERATED_AT,
+        invoker_function_name="OpsAgentOnAwsStack-invoker",
+        invoker_region="ap-northeast-1",
+    )
+    description = json.loads(notification.message)["content"]["description"]
+
+    # 決定 27 と同じく、受け取った人に関数名を調べさせない
+    assert "--function-name OpsAgentOnAwsStack-invoker" in description
+    assert "--region ap-northeast-1" in description
+    # AWS CLI の既定 60 秒ではタイムアウトして多重実行になる
+    assert "--cli-read-timeout 0" in description
+
+
+def test_関数名かリージョンが欠けたら再実行コマンドは省く() -> None:
+    notification = build_daily_failure_notification(
+        error="失敗", generated_at=GENERATED_AT, invoker_function_name="OpsAgentOnAwsStack-invoker"
+    )
+    description = json.loads(notification.message)["content"]["description"]
+
+    # 途中で入力を求められる不完全な案内は出さない
+    assert "aws lambda invoke" not in description
+    assert "中継 Lambda を手動で実行" in description

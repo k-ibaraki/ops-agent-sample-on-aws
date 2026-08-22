@@ -129,6 +129,23 @@ def test_日次通知に中継Lambdaの実名が載る() -> None:
     assert "--region ap-northeast-1" in description
 
 
+def test_日次の失敗通知にも中継Lambdaの実名が載る(waits: list[float]) -> None:
+    config = Config.from_env(
+        {
+            "SNS_TOPIC_ARN": CONFIG.sns_topic_arn,
+            "AWS_REGION": "ap-northeast-1",
+            "INVOKER_FUNCTION_NAME": "OpsAgentOnAwsStack-invoker",
+            "INVOKER_REGION": "ap-northeast-1",
+        }
+    )
+    sns = FakeSns()
+
+    run_daily_check(config, agent=FlakyStructuredOutputAgent(failures=99), sns_client=sns)
+
+    description = json.loads(sns.publish_kwargs["Message"])["content"]["description"]
+    assert "--function-name OpsAgentOnAwsStack-invoker" in description
+
+
 class FlakyStructuredOutputAgent(FakeAgent):
     """指定回数だけ構造化出力に失敗するエージェント。"""
 

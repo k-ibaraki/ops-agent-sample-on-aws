@@ -43,11 +43,11 @@ logger = logging.getLogger(__name__)
 # 調査方針・採点基準・レポート書式を Strands の Skills 機能で渡す（配下のスキルをすべて読み込む）
 SKILLS_DIR = Path(__file__).parent / "skills"
 
-# 構造化出力はモデルが期待どおりの応答を返さず失敗することがあるため、初回 + リトライ 2 回まで試す
-STRUCTURED_OUTPUT_ATTEMPTS = 3
-# 再試行の間隔（秒）。要素数は STRUCTURED_OUTPUT_ATTEMPTS - 1。
-# 間を空けずに連打しても同じ結果になりやすく、スロットリングにも効かないため
+# 構造化出力はモデルが期待どおりの応答を返さず失敗することがあるため、間を空けて再試行する。
+# 間を空けずに連打しても同じ結果になりやすく、スロットリングにも効かない
 RETRY_BACKOFF_SECONDS = (4, 16)
+# 初回 + 待機を挟んだ再試行。両者がずれて IndexError で原因が隠れないよう、間隔から導く
+STRUCTURED_OUTPUT_ATTEMPTS = len(RETRY_BACKOFF_SECONDS) + 1
 
 
 def _sleep(seconds: float) -> None:
@@ -130,6 +130,20 @@ def _structured_output[T: BaseModel](
     return _request_structured_output(agent, output_model, prompt)
 
 
+def _publish_daily_failure(sns_client: Any, config: Config, error: str) -> None:
+    """日次チェックが失敗したことを伝える。失敗した日も通知は 1 通届ける。"""
+    publish_notification(
+        sns_client,
+        topic_arn=config.sns_topic_arn,
+        notification=build_daily_failure_notification(
+            error=error,
+            generated_at=datetime.now(UTC),
+            invoker_function_name=config.invoker_function_name,
+            invoker_region=config.invoker_region,
+        ),
+    )
+
+
 def run_daily_check(
     config: Config,
     *,
@@ -153,13 +167,7 @@ def run_daily_check(
         # 失敗しても毎朝 1 通は届ける（死活確認を兼ねるため）。
         # Slack に出す一方で、原因追跡のために実行ログにも残す
         logger.exception("日次チェックに失敗しました")
-        publish_notification(
-            sns_client,
-            topic_arn=config.sns_topic_arn,
-            notification=build_daily_failure_notification(
-                error=str(exc), generated_at=datetime.now(UTC)
-            ),
-        )
+        _publish_daily_failure(sns_client, config, str(exc))
         return None
 
     notification = build_notification(
