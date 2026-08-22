@@ -27,7 +27,8 @@ uv run ty check        # 型チェック
 | `models.py` | 調査結果のスキーマ（`DailyReport` / `AdhocReport`、構造化出力用） |
 | `aws_tools.py` | CloudWatch 調査ツール群（読み取り専用） |
 | `agent.py` | 調査 → 構造化出力 → 通知のオーケストレーション（日次 / 依頼の両方） |
+| `prompts.py` | プロンプトの組み立て（設定値の埋め込み・スキルの読み込み指示・インジェクション対策） |
 | `report.py` | 通知メッセージの整形（回答・失敗通知を含む） |
 | `notifier.py` | SNS への発行 |
 | `main.py` | AgentCore Runtime のエントリポイント（ペイロードで 2 経路を振り分け） |
-| `skills/` | レポート文面の書式ルール（Strands Skills）。日次用と依頼回答用の 2 種 |
+| `skills/` | 調査の方針・採点基準・レポート書式（Strands Skills）。`investigation-policy` / `scoring-rubric` / 書式 2 種の計 4 種 |
