@@ -91,7 +91,8 @@ LLM に任せる範囲を意図的に絞っている。この分離はセキュ�
 - **ツールは読み取り専用のみ**: `aws_tools.py` は boto3 の薄いラッパー 8 種。対象リージョンを `Config.target_regions` の許可リストで検証し、調査期間は `Config.max_lookback_hours` で頭打ちにする（`_resolve_hours()` が唯一の経路）。書き込み系の権限・ツールをエージェントに追加しない方針
 - **静的な方針・基準は Strands Skills で誘導**: `skills/` 配下の 4 スキル（調査の方針・手順 = `investigation-policy`、採点基準 = `scoring-rubric`、レポート書式 = `slack-report-style` / `adhoc-report-style`）。`AgentSkills` には `skills/` ごと渡してすべて読み込ませる。スキル本文は保証注入ではないため、読み込みはプロンプト側で明示指示する
 - **プロンプトの組み立ては `prompts.py` に集約**: 設定値の埋め込み・スキルの読み込み指示・インジェクション対策のガード文言など、必ずモデルに届けたい要素はスキルではなくここに置く（`agent.py` はオーケストレーション専任）
-- **Slack からの依頼は非同期なので失敗も必ず通知する**: `run_adhoc_investigation()` は例外時に失敗通知を発行してから再送出する（依頼者を待たせ続けないため）
+- **失敗は必ず通知し、通知できたら例外にしない**: `run_daily_check()` / `run_adhoc_investigation()` は例外時に失敗通知を発行して `None` を返す。日次は「毎日必ず 1 通」を失敗した日にも守るため、アドホックは非同期で依頼者を待たせ続けないため。通知すら発行できなかった失敗だけを送出し、中継 Lambda の `Errors` アラームに拾わせる（通知済みの失敗まで例外にすると Slack に 2 通並ぶ）
+- **リトライはエージェント内に置き、中継 Lambda 層には置かない**: 失敗の実体は最終段の構造化出力（数秒）で、Lambda 層のリトライは 2〜3 分の調査を丸ごとやり直すことになるため
 - **設定は環境変数経由**: `config.py` の `Config.from_env()`。環境変数は CDK スタック（`stacks/ops-agent-stack.ts` の `environmentVariables`）が設定するため、設定項目の追加時は両側の変更が必要
 - **時刻の扱い**: 調査・推論は UTC のまま、最終レポートは JST 変換して「JST」を明記（システムプロンプトと `report.py` の両方に規定がある）
 
@@ -102,6 +103,7 @@ LLM に任せる範囲を意図的に絞っている。この分離はセキュ�
 - AgentCore Runtime は `aws_bedrockagentcore` の L2 construct で、`agent/` の Dockerfile を linux/arm64 でビルドしてデプロイする
 - IAM はエージェントの調査ツールが使う読み取り API のみの最小権限。ツール追加時は `runtime.grant()` のアクション一覧も更新する
 - 中継 Lambda と Scheduler はリトライ 0 回に設定（エージェントの多重実行 = 重複通知を防ぐため）。この設定を変えないこと
+- 中継 Lambda の `Errors` にアラームを張り、エージェントが自力で通知できなかった失敗（コンテナ障害・タイムアウト）を拾う。復旧通知（OK アクション）は付けない
 - Slack 連携を作る場合、チャネルロールとガードレールポリシーの両方を中継 Lambda の `lambda:InvokeFunction` だけに絞る。ガードレールは未指定だと AdministratorAccess が既定になるため省略しないこと
 
 ### テストの構成

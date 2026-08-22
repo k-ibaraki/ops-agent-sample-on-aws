@@ -7,6 +7,7 @@ from ops_agent.models import AdhocReport, DailyReport, Finding
 from ops_agent.report import (
     MAX_DESCRIPTION_CHARS,
     build_adhoc_notification,
+    build_daily_failure_notification,
     build_failure_notification,
     build_notification,
 )
@@ -304,3 +305,65 @@ def test_調査失敗時は依頼者に失敗を知らせる通知になる() ->
     assert "ThrottlingException" in description
     # 回答と同じく、依頼内容と地続きに見えないよう見出しで区切る
     assert "*📝 結果*" in description
+
+
+def test_日次チェックの失敗も成功時と同じ系統の通知になる() -> None:
+    notification = build_daily_failure_notification(
+        error="ValueError: No valid tool use or tool use input was found in the Bedrock response.",
+        generated_at=GENERATED_AT,
+    )
+    message = json.loads(notification.message)
+
+    title = message["content"]["title"]
+    description = message["content"]["description"]
+    # 成功時の通知（🚨 / ✅ 日次ヘルスチェック <日付>）と並べて読めるようにする
+    assert title == "❌ 日次ヘルスチェック 2026-08-17: 実行に失敗"
+    assert notification.subject == "[ops-agent] 日次ヘルスチェック 2026-08-17: 実行に失敗"
+    assert "*📝 結果*" in description
+    assert "ValueError" in description
+    # 依頼内容の欄は日次には無い
+    assert "依頼内容" not in description
+
+
+def test_日次の失敗通知の太字も行全体を包む() -> None:
+    notification = build_daily_failure_notification(error="失敗", generated_at=GENERATED_AT)
+    description = json.loads(notification.message)["content"]["description"]
+
+    for line in description.split("\n"):
+        if "*" in line:
+            assert line.startswith("*") and line.endswith("*"), line
+            assert "*" not in line[1:-1], line
+
+
+def test_日次の失敗通知はエラー内容を切り詰める() -> None:
+    notification = build_daily_failure_notification(error="あ" * 5000, generated_at=GENERATED_AT)
+    description = json.loads(notification.message)["content"]["description"]
+
+    assert len(description) <= MAX_DESCRIPTION_CHARS
+
+
+def test_日次の失敗通知に手動で再実行するコマンドが載る() -> None:
+    notification = build_daily_failure_notification(
+        error="失敗",
+        generated_at=GENERATED_AT,
+        invoker_function_name="OpsAgentOnAwsStack-invoker",
+        invoker_region="ap-northeast-1",
+    )
+    description = json.loads(notification.message)["content"]["description"]
+
+    # 決定 27 と同じく、受け取った人に関数名を調べさせない
+    assert "--function-name OpsAgentOnAwsStack-invoker" in description
+    assert "--region ap-northeast-1" in description
+    # AWS CLI の既定 60 秒ではタイムアウトして多重実行になる
+    assert "--cli-read-timeout 0" in description
+
+
+def test_関数名かリージョンが欠けたら再実行コマンドは省く() -> None:
+    notification = build_daily_failure_notification(
+        error="失敗", generated_at=GENERATED_AT, invoker_function_name="OpsAgentOnAwsStack-invoker"
+    )
+    description = json.loads(notification.message)["content"]["description"]
+
+    # 途中で入力を求められる不完全な案内は出さない
+    assert "aws lambda invoke" not in description
+    assert "中継 Lambda を手動で実行" in description

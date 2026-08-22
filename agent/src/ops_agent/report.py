@@ -186,6 +186,52 @@ def build_adhoc_notification(
     )
 
 
+def build_retry_hint(invoker_function_name: str = "", invoker_region: str = "") -> str:
+    """失敗通知の末尾に載せる、手動での再実行方法。
+
+    受け取った人に関数名を調べさせないよう実名で埋める。どちらかが不明なときは、
+    そのままでは実行できない不完全な案内を出さない（`build_adhoc_hint` と同じ作法）。
+    """
+    if not (invoker_function_name and invoker_region):
+        return "*🔁 対処*\n実行ログを確認するか、中継 Lambda を手動で実行して再試行してください。"
+    return (
+        "*🔁 対処*\n"
+        "実行ログを確認するか、次のコマンドで手動実行して再試行してください。\n"
+        # --cli-read-timeout 0 が無いと AWS CLI の既定 60 秒でタイムアウトし、
+        # リトライでエージェントが多重実行される
+        f"`aws lambda invoke --function-name {invoker_function_name} "
+        f"--region {invoker_region} --cli-read-timeout 0 "
+        f"--cli-binary-format raw-in-base64-out --payload '{{}}' /dev/stdout`"
+    )
+
+
+def build_daily_failure_notification(
+    *,
+    error: str,
+    generated_at: datetime,
+    invoker_function_name: str = "",
+    invoker_region: str = "",
+) -> Notification:
+    """日次チェックが失敗したことを伝える通知を組み立てる。
+
+    決定 10（毎日必ずサマリを 1 通送信し、死活確認を兼ねる）を失敗した日にも守るための経路。
+    成功時の通知（🚨 / ✅）と並べて読めるよう、タイトルの形を揃える。
+    """
+    date_str = generated_at.astimezone(JST).strftime("%Y-%m-%d")
+    hint = build_retry_hint(invoker_function_name, invoker_region)
+    description = (
+        f"*📝 結果*\n"
+        f"調査の途中でエラーが発生したため、本日のレポートを作成できませんでした。\n\n"
+        f"*⚠️ エラー内容*\n{_clip(error.strip(), MAX_ERROR_CHARS)}\n\n"
+        f"{hint}"
+    )
+    return _custom_notification(
+        title=f"❌ 日次ヘルスチェック {date_str}: 実行に失敗",
+        description=_clip(description, MAX_DESCRIPTION_CHARS),
+        subject=f"[ops-agent] 日次ヘルスチェック {date_str}: 実行に失敗",
+    )
+
+
 def build_failure_notification(
     *, question: str, error: str, generated_at: datetime
 ) -> Notification:
