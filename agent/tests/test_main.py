@@ -59,3 +59,31 @@ def test_entrypointは調査依頼を受けたらアドホック調査に振り�
     assert result["status"] == "ok"
     assert result["mode"] == "adhoc"
     assert captured["question"] == "昨日のエラーを詳しく"
+
+
+def test_entrypointは日次チェックの失敗を失敗として返す(monkeypatch: Any) -> None:
+    # 失敗はエージェント側で通知済みのため、ここで例外にすると
+    # 中継 Lambda のエラーアラームが二重に鳴る
+    def fake_run_daily_check(config: Any) -> DailyReport | None:
+        return None
+
+    monkeypatch.setenv("SNS_TOPIC_ARN", "arn:aws:sns:ap-northeast-1:123456789012:topic")
+    monkeypatch.setenv("AWS_REGION", "ap-northeast-1")
+    monkeypatch.setattr(main_module, "run_daily_check", fake_run_daily_check)
+
+    result = main_module.invoke({"trigger": "scheduled"})
+
+    assert result == {"status": "failed", "mode": "daily"}
+
+
+def test_entrypointはアドホック調査の失敗を失敗として返す(monkeypatch: Any) -> None:
+    def fake_run_adhoc(config: Any, question: str) -> AdhocReport | None:
+        return None
+
+    monkeypatch.setenv("SNS_TOPIC_ARN", "arn:aws:sns:ap-northeast-1:123456789012:topic")
+    monkeypatch.setenv("AWS_REGION", "ap-northeast-1")
+    monkeypatch.setattr(main_module, "run_adhoc_investigation", fake_run_adhoc)
+
+    result = main_module.invoke({"trigger": "adhoc", "message": "調べて"})
+
+    assert result == {"status": "failed", "mode": "adhoc"}

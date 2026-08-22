@@ -23,6 +23,10 @@ def invoke(payload: dict[str, Any]) -> dict[str, Any]:
         question = str(payload.get("message", "")).strip()
         logger.info("アドホック調査を開始します: question=%s", question)
         adhoc = run_adhoc_investigation(config, question)
+        # 失敗はすでに Slack へ通知済み。ここで例外にすると中継 Lambda の
+        # エラーアラームが二重に鳴るため、失敗した旨を戻り値で伝えるに留める
+        if adhoc is None:
+            return {"status": "failed", "mode": "adhoc"}
         return {
             "status": "ok",
             "mode": "adhoc",
@@ -31,6 +35,8 @@ def invoke(payload: dict[str, Any]) -> dict[str, Any]:
 
     logger.info("日次チェックを開始します: payload=%s", payload)
     report = run_daily_check(config)
+    if report is None:
+        return {"status": "failed", "mode": "daily"}
     return {
         "status": "ok",
         "mode": "daily",

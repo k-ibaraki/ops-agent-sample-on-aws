@@ -186,6 +186,26 @@ def build_adhoc_notification(
     )
 
 
+def build_daily_failure_notification(*, error: str, generated_at: datetime) -> Notification:
+    """日次チェックが失敗したことを伝える通知を組み立てる。
+
+    決定 10（毎日必ずサマリを 1 通送信し、死活確認を兼ねる）を失敗した日にも守るための経路。
+    成功時の通知（🚨 / ✅）と並べて読めるよう、タイトルの形を揃える。
+    """
+    date_str = generated_at.astimezone(JST).strftime("%Y-%m-%d")
+    description = (
+        f"*📝 結果*\n"
+        f"調査の途中でエラーが発生したため、本日のレポートを作成できませんでした。\n"
+        f"実行ログを確認するか、中継 Lambda を手動で実行して再試行してください。\n\n"
+        f"*⚠️ エラー内容*\n{_clip(error.strip(), MAX_ERROR_CHARS)}"
+    )
+    return _custom_notification(
+        title=f"❌ 日次ヘルスチェック {date_str}: 実行に失敗",
+        description=_clip(description, MAX_DESCRIPTION_CHARS),
+        subject=f"[ops-agent] 日次ヘルスチェック {date_str}: 実行に失敗",
+    )
+
+
 def build_failure_notification(
     *, question: str, error: str, generated_at: datetime
 ) -> Notification:
