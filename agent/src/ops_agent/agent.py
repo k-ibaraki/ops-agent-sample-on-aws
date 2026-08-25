@@ -18,7 +18,7 @@ from typing import Any, Protocol
 import boto3
 from pydantic import BaseModel
 from strands import Agent, AgentSkills
-from strands.models import BedrockModel
+from strands.models import BedrockModel, CacheConfig
 
 from ops_agent.aws_tools import build_tools
 from ops_agent.config import Config
@@ -72,12 +72,20 @@ class InvestigatorAgent(Protocol):
     ) -> AgentInvocationResult: ...
 
 
-def build_agent(config: Config) -> Agent:
+def build_agent(config: Config, *, boto_session: Any = None) -> Agent:
     """CloudWatch 調査ツールと skills/ 配下のスキル
     （調査方針・採点基準・レポート書式）を持つ Strands エージェントを組み立てる。
     """
     return Agent(
-        model=BedrockModel(model_id=config.model_id),
+        model=BedrockModel(
+            model_id=config.model_id,
+            # 調査ループはツール往復のたびに同じプレフィックス（システムプロンプト・
+            # ツール定義・会話履歴）を再送するため、プロンプトキャッシュで再利用する。
+            # 呼び出しは日次ゆえキャッシュの TTL（最長 1 時間）を跨いだ再利用は成立せず、
+            # 効くのは単一ループ内だけ。TTL は既定の 5 分で足りる（往復間隔は数秒）
+            cache_config=CacheConfig(strategy="auto"),
+            boto_session=boto_session,
+        ),
         system_prompt=build_system_prompt(config),
         tools=build_tools(config),
         plugins=[AgentSkills(skills=str(SKILLS_DIR))],
