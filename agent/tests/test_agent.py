@@ -70,6 +70,28 @@ class FakeAgent:
         return FakeAgentResult(self.structured_result)
 
 
+class FakeBotoClient:
+    """boto3 クライアントのうち、BedrockModel が生成直後に参照する部分だけを模す。"""
+
+    class Meta:
+        region_name = "ap-northeast-1"
+
+    meta = Meta()
+
+
+class FakeBotoSession:
+    """boto3.Session のうち、BedrockModel が使う部分だけを模す。
+
+    実セッションはクライアント生成時に実行環境の認証情報解決が走り、
+    テストが環境依存になるため使わない。
+    """
+
+    region_name = "ap-northeast-1"
+
+    def client(self, **kwargs: Any) -> Any:
+        return FakeBotoClient()
+
+
 class FakeSns:
     def __init__(self) -> None:
         self.publishes: list[dict[str, Any]] = []
@@ -292,6 +314,16 @@ def test_依頼内容が空なら調査せずに失敗を通知する() -> None:
     assert agent.prompts == []
     message = json.loads(sns.publish_kwargs["Message"])
     assert "失敗" in message["content"]["title"]
+
+
+def test_build_agentはプロンプトキャッシュを自動戦略で有効にする() -> None:
+    agent = agent_module.build_agent(CONFIG, boto_session=FakeBotoSession())
+
+    # 調査ループはツール往復のたびに同じプレフィックス（システムプロンプト・ツール定義・
+    # 会話履歴）を再送するため、ループ内のキャッシュ再利用を有効にしておく
+    cache_config = agent.model.get_config().get("cache_config")
+    assert cache_config is not None
+    assert cache_config.strategy == "auto"
 
 
 def test_エージェントの組み立てに失敗した場合も依頼者に通知される(monkeypatch: Any) -> None:
