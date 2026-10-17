@@ -48,8 +48,9 @@ describe("OpsAgentStack", () => {
   });
 
   test("Runtime の実行ロールに CloudWatch 読み取りの最小権限が付与される", () => {
-    // 実行ロールに Resource "*" で付くアクションが、調査ツール用の読み取りアクションと
+    // 実行ロールに Resource "*" を含む形で付くアクションが、調査ツール用の読み取りアクションと
     // L2 construct が既定で付けるものだけであること（書き込み系が足されたら落ちる）。
+    // Condition の有無は問わない（条件付きでも Resource "*" の書き込み系は見逃さない）。
     // minimizePolicies フラグで同じ Resource のステートメントは統合・並べ替えされるため、
     // ステートメントの形ではなくアクションの集合で確かめる
     const runtimePolicies = template.findResources("AWS::IAM::Policy", {
@@ -60,7 +61,7 @@ describe("OpsAgentStack", () => {
     expect(Object.keys(runtimePolicies)).toHaveLength(1);
     const wildcardActions = Object.values(runtimePolicies)
       .flatMap((policy) => policy.Properties.PolicyDocument.Statement)
-      .filter((s) => s.Effect === "Allow" && s.Resource === "*" && !s.Condition)
+      .filter((s) => s.Effect === "Allow" && [s.Resource].flat().includes("*"))
       .flatMap((s) => [s.Action].flat())
       .sort();
     expect(wildcardActions).toEqual(
@@ -76,7 +77,9 @@ describe("OpsAgentStack", () => {
         "logs:StartQuery",
         "logs:GetQueryResults",
         "logs:StopQuery",
-        // AgentCore Runtime の L2 construct が既定で付ける（イメージ取得とトレース送信）
+        // AgentCore Runtime の L2 construct が既定で付ける（イメージ取得・トレース送信・
+        // メトリクス送信。PutMetricData は bedrock-agentcore 名前空間に Condition で限定）
+        "cloudwatch:PutMetricData",
         "ecr:GetAuthorizationToken",
         "xray:GetSamplingRules",
         "xray:GetSamplingTargets",
