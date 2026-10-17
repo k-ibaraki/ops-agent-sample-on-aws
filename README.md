@@ -58,6 +58,10 @@ pnpm cdk deploy
 
 デプロイが完了すると、毎朝 8:00 JST にエージェントが起動します。
 
+以前の版でデプロイしたスタックを削除した環境では、中継 Lambda のロググループ
+（`/aws/lambda/OpsAgentOnAwsStack-invoker`）が残っていて、デプロイが `AlreadyExists` で失敗します。
+残ったロググループを削除してからデプロイしてください（今の版ではスタックと一緒に削除されます）。
+
 ### Slack 通知の設定（任意）
 
 Slack 連携は [Amazon Q Developer in chat applications](https://docs.aws.amazon.com/chatbot/latest/adminguide/what-is.html)（旧 AWS Chatbot）を使います。シークレット管理は不要です。

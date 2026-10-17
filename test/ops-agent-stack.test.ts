@@ -53,12 +53,26 @@ describe("OpsAgentStack", () => {
     // Condition の有無は問わない（条件付きでも Resource "*" の書き込み系は見逃さない）。
     // minimizePolicies フラグで同じ Resource のステートメントは統合・並べ替えされるため、
     // ステートメントの形ではなくアクションの集合で確かめる
+    // 他のロールと共有するポリシーも拾うため、Roles は「実行ロールを含む」で絞る
     const runtimePolicies = template.findResources("AWS::IAM::Policy", {
       Properties: {
-        Roles: [{ Ref: Match.stringLikeRegexp("^AgentRuntimeExecutionRole") }],
+        Roles: Match.arrayWith([
+          { Ref: Match.stringLikeRegexp("^AgentRuntimeExecutionRole") },
+        ]),
       },
     });
-    expect(Object.keys(runtimePolicies)).toHaveLength(1);
+    expect(Object.keys(runtimePolicies).length).toBeGreaterThan(0);
+    // 管理ポリシー（AWS 管理ポリシーを含む）経由の権限は上の集計に現れないため、付けていないこと
+    template.hasResourceProperties("AWS::IAM::Role", {
+      AssumeRolePolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Principal: { Service: "bedrock-agentcore.amazonaws.com" },
+          }),
+        ]),
+      }),
+      ManagedPolicyArns: Match.absent(),
+    });
     const wildcardActions = Object.values(runtimePolicies)
       .flatMap((policy) => policy.Properties.PolicyDocument.Statement)
       .filter((s) => s.Effect === "Allow" && [s.Resource].flat().includes("*"))
