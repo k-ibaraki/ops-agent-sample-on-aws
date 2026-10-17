@@ -87,6 +87,18 @@ describe("OpsAgentStack", () => {
     });
   });
 
+  test("中継 Lambda のロググループはスタック削除時に一緒に消える", () => {
+    // 残ると関数名が決め打ちのため、作り直しのデプロイが AlreadyExists で失敗する
+    template.resourceCountIs("AWS::Logs::LogGroup", 1);
+    template.hasResource("AWS::Logs::LogGroup", {
+      Properties: Match.objectLike({
+        LogGroupName: "/aws/lambda/TestStack-invoker",
+      }),
+      DeletionPolicy: "Delete",
+      UpdateReplacePolicy: "Delete",
+    });
+  });
+
   test("エージェントに中継 Lambda の関数名が渡される", () => {
     // 依頼コマンドの案内を通知に実名で載せるために必要
     template.hasResourceProperties("AWS::BedrockAgentCore::Runtime", {

@@ -7,6 +7,7 @@ import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as logs from "aws-cdk-lib/aws-logs";
 import * as scheduler from "aws-cdk-lib/aws-scheduler";
 import * as schedulerTargets from "aws-cdk-lib/aws-scheduler-targets";
 import * as sns from "aws-cdk-lib/aws-sns";
@@ -125,6 +126,12 @@ export function createOpsAgentStack(
   topic.grantPublish(runtime);
 
   // ---- 中継 Lambda（Scheduler から起動され Runtime を同期呼び出しする） ----
+  // CDK が自動で作るロググループは既定で RETAIN になり、スタック削除後も残る。
+  // 関数名を決め打ちにしているため、残ると作り直しのデプロイが AlreadyExists で失敗する
+  const invokerLogGroup = new logs.LogGroup(stack, "InvokerLogGroup", {
+    logGroupName: `/aws/lambda/${invokerFunctionName}`,
+    removalPolicy: cdk.RemovalPolicy.DESTROY,
+  });
   const invoker = new lambda.Function(stack, "InvokerFunction", {
     description: "EventBridge Scheduler から AgentCore Runtime を起動する中継 Lambda",
     functionName: invokerFunctionName,
@@ -137,6 +144,7 @@ export function createOpsAgentStack(
     // エージェントの調査完了まで同期で待つため、Lambda の上限いっぱいに設定
     timeout: cdk.Duration.minutes(15),
     memorySize: 256,
+    logGroup: invokerLogGroup,
     environment: {
       AGENT_RUNTIME_ARN: runtime.agentRuntimeArn,
     },
