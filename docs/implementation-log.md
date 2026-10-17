@@ -432,3 +432,23 @@ Lambda の `Errors` は 0 件だった。決定 29 と決定 30 の役割分担�
 - CDK: jest 17 件パス / tsc 成功
 - 未検証（デプロイ後に確認する）: 実機のレスポンスで `cacheReadInputTokens` が
   正の値になること。仮に効いていなくても通常の全額課金に戻るだけで、機能面の退行は起きない
+
+## 2026-10-17: 中継 Lambda のロググループをスタック削除時に消す
+
+サンドボックスへの新規デプロイで、前のスタックが残した `/aws/lambda/OpsAgentOnAwsStack-invoker`
+と名前がぶつかり `AlreadyExists` でロールバックした。CDK が自動で作るロググループは既定で
+RETAIN のため、スタックを消しても残る。ロググループを明示的に作って `RemovalPolicy.DESTROY`
+を付けた（DESIGN.md 決定 32）。
+
+### 実装上の判断・つまずき
+
+- jest の `new cdk.App()` には cdk.json の feature flag が入らないため、自動生成の
+  ロググループはテストのテンプレートに現れない（レッドの時点で 0 個）。実際の synth では
+  明示したロググループ 1 個だけになり、自動生成分と二重にならないことを確認した
+- 論理 ID が `InvokerFunction/LogGroup` から `InvokerLogGroup` に変わる。既存スタックへの
+  更新デプロイでは、旧ロググループ（RETAIN）が残ったまま同名で作ろうとして失敗するため、
+  旧ロググループを手で消してからデプロイする必要がある
+
+### 検証結果
+
+- CDK: jest 18 件パス / tsc 成功 / synth でロググループ 1 個・`DeletionPolicy: Delete` を確認
