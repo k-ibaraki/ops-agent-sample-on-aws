@@ -436,19 +436,31 @@ Lambda の `Errors` は 0 件だった。決定 29 と決定 30 の役割分担�
 ## 2026-10-17: 中継 Lambda のロググループをスタック削除時に消す
 
 サンドボックスへの新規デプロイで、前のスタックが残した `/aws/lambda/OpsAgentOnAwsStack-invoker`
-と名前がぶつかり `AlreadyExists` でロールバックした。CDK が自動で作るロググループは既定で
-RETAIN のため、スタックを消しても残る。ロググループを明示的に作って `RemovalPolicy.DESTROY`
-を付けた（DESIGN.md 決定 32）。
+と名前がぶつかり `AlreadyExists` でロールバックした。cdk.json の `useCdkManagedLogGroup`
+フラグで自動生成されるロググループは既定で RETAIN のため、スタックを消しても残る。
+自動生成のロググループに `applyRemovalPolicy()` で `RemovalPolicy.DESTROY` を直接付けた
+（DESIGN.md 決定 32）。
 
 ### 実装上の判断・つまずき
 
-- jest の `new cdk.App()` には cdk.json の feature flag が入らないため、自動生成の
-  ロググループはテストのテンプレートに現れない（レッドの時点で 0 個）。実際の synth では
-  明示したロググループ 1 個だけになり、自動生成分と二重にならないことを確認した
-- 論理 ID が `InvokerFunction/LogGroup` から `InvokerLogGroup` に変わる。既存スタックへの
-  更新デプロイでは、旧ロググループ（RETAIN）が残ったまま同名で作ろうとして失敗するため、
-  旧ロググループを手で消してからデプロイする必要がある
+- 最初は `logs.LogGroup` を明示的に作って `logGroup` プロパティで渡したが、コンストラクトの
+  パスが `InvokerFunction/LogGroup` から変わり、論理 ID も変わる。旧版をデプロイ済みの
+  スタックを更新すると、RETAIN の旧ロググループを消す前に同じ名前で作ろうとして失敗するため、
+  論理 ID を変えない今の方法に切り替えた。CDK も `logRemovalPolicy` とフラグの併用エラーで
+  「自動生成のロググループに直接付ける」よう案内している
+- jest の `new cdk.App()` は cdk.json を読まないため、フラグが入らず自動生成のロググループが
+  テンプレートに現れなかった。テストでは cdk.json の `context` を読んで App に渡し、本番の
+  synth と揃えた
+- フラグを揃えると `minimizePolicies` で IAM のステートメントが統合・並べ替えされ、
+  ステートメントの形を固定していた既存の IAM テストが落ちた（本番には無い形を確かめていた）。
+  `Resource: "*"` のステートメントに読み取りアクションが含まれるかで確かめる形に直した
+- 明示的に作る版（コミット `c5a409b`）を一度サンドボックスにデプロイしたため、そのスタックに
+  今の版を更新デプロイすると、逆向きに同じ名前の衝突が起きる。そのスタックは削除してから
+  デプロイし直す（ロググループは DESTROY なので一緒に消える）
 
 ### 検証結果
 
-- CDK: jest 18 件パス / tsc 成功 / synth でロググループ 1 個・`DeletionPolicy: Delete` を確認
+- CDK: jest 18 件パス / tsc 成功
+- synth で、ロググループが 1 個だけ・論理 ID が変更前と同じ `InvokerFunctionLogGroupD01FAC38`・
+  `DeletionPolicy` / `UpdateReplacePolicy` が `Delete` であることを確認
+- `applyRemovalPolicy()` の行を外すと、追加したテストが `DeletionPolicy: Retain` で落ちることを確認
