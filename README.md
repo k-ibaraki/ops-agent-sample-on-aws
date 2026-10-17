@@ -49,6 +49,15 @@ cd agent && uv sync   # エージェント側の依存関係（開発時のみ�
 
 ## デプロイ
 
+> [!NOTE]
+> 2026-10-17 より前の版でデプロイしたスタックを削除した環境では、中継 Lambda のロググループが
+> 残っていて、デプロイが `AlreadyExists` で失敗します。デプロイの前に次のコマンドで削除してください
+> （今の版では、ロググループはスタックと一緒に削除されます）。
+>
+> ```sh
+> aws logs delete-log-group --log-group-name /aws/lambda/OpsAgentOnAwsStack-invoker
+> ```
+
 ```sh
 # 初回のみ（CDK を使ったことがないアカウント/リージョンの場合）
 pnpm cdk bootstrap
@@ -57,10 +66,6 @@ pnpm cdk deploy
 ```
 
 デプロイが完了すると、毎朝 8:00 JST にエージェントが起動します。
-
-以前の版でデプロイしたスタックを削除した環境では、中継 Lambda のロググループ
-（`/aws/lambda/OpsAgentOnAwsStack-invoker`）が残っていて、デプロイが `AlreadyExists` で失敗します。
-残ったロググループを削除してからデプロイしてください（今の版ではスタックと一緒に削除されます）。
 
 ### Slack 通知の設定（任意）
 

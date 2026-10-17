@@ -54,15 +54,24 @@ describe("OpsAgentStack", () => {
     // minimizePolicies フラグで同じ Resource のステートメントは統合・並べ替えされるため、
     // ステートメントの形ではなくアクションの集合で確かめる
     // 他のロールと共有するポリシーも拾うため、Roles は「実行ロールを含む」で絞る
-    const runtimePolicies = template.findResources("AWS::IAM::Policy", {
+    const attachedToRuntimeRole = {
       Properties: {
         Roles: Match.arrayWith([
           { Ref: Match.stringLikeRegexp("^AgentRuntimeExecutionRole") },
         ]),
       },
-    });
+    };
+    const runtimePolicies = template.findResources(
+      "AWS::IAM::Policy",
+      attachedToRuntimeRole,
+    );
     expect(Object.keys(runtimePolicies).length).toBeGreaterThan(0);
-    // 管理ポリシー（AWS 管理ポリシーを含む）経由の権限は上の集計に現れないため、付けていないこと
+    // 管理ポリシー経由の権限は上の集計に現れないため、付けていないこと。
+    // 付け方によってポリシー側の Roles（自前の管理ポリシー）か、
+    // ロール側の ManagedPolicyArns（AWS 管理ポリシー）に出るので両方を見る
+    expect(
+      template.findResources("AWS::IAM::ManagedPolicy", attachedToRuntimeRole),
+    ).toEqual({});
     template.hasResourceProperties("AWS::IAM::Role", {
       AssumeRolePolicyDocument: Match.objectLike({
         Statement: Match.arrayWith([
