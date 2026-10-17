@@ -48,48 +48,41 @@ describe("OpsAgentStack", () => {
   });
 
   test("Runtime の実行ロールに CloudWatch 読み取りの最小権限が付与される", () => {
-    // 実行ロールに Resource "*" を含む形で付くアクションが、調査ツール用の読み取りアクションと
-    // L2 construct が既定で付けるものだけであること（書き込み系が足されたら落ちる）。
-    // Condition の有無は問わない（条件付きでも Resource "*" の書き込み系は見逃さない）。
-    // minimizePolicies フラグで同じ Resource のステートメントは統合・並べ替えされるため、
-    // ステートメントの形ではなくアクションの集合で確かめる
+    // 実行ロールに付くアクションが、自前で付けたものと L2 construct の既定分だけであること
+    // （書き込み系が足されたら落ちる）。minimizePolicies でステートメントは統合・並べ替え
+    // されるため、形ではなくアクションの集合で見る
+    const roleId = template.getResourceId("AWS::IAM::Role", {
+      Properties: {
+        AssumeRolePolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Principal: { Service: "bedrock-agentcore.amazonaws.com" },
+            }),
+          ]),
+        },
+      },
+    });
     // 他のロールと共有するポリシーも拾うため、Roles は「実行ロールを含む」で絞る
     const attachedToRuntimeRole = {
-      Properties: {
-        Roles: Match.arrayWith([
-          { Ref: Match.stringLikeRegexp("^AgentRuntimeExecutionRole") },
-        ]),
-      },
+      Properties: { Roles: Match.arrayWith([{ Ref: roleId }]) },
     };
-    const runtimePolicies = template.findResources(
-      "AWS::IAM::Policy",
-      attachedToRuntimeRole,
-    );
-    expect(Object.keys(runtimePolicies).length).toBeGreaterThan(0);
-    // 管理ポリシー経由の権限は上の集計に現れないため、付けていないこと。
-    // 付け方によってポリシー側の Roles（自前の管理ポリシー）か、
-    // ロール側の ManagedPolicyArns（AWS 管理ポリシー）に出るので両方を見る
+    // 管理ポリシー経由の権限は下の集計に現れないため、付いていないことを確かめる
     expect(
       template.findResources("AWS::IAM::ManagedPolicy", attachedToRuntimeRole),
     ).toEqual({});
-    template.hasResourceProperties("AWS::IAM::Role", {
-      AssumeRolePolicyDocument: Match.objectLike({
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Principal: { Service: "bedrock-agentcore.amazonaws.com" },
-          }),
-        ]),
-      }),
-      ManagedPolicyArns: Match.absent(),
-    });
-    const wildcardActions = Object.values(runtimePolicies)
+    expect(
+      template.toJSON().Resources[roleId].Properties.ManagedPolicyArns,
+    ).toBeUndefined();
+
+    const actions = Object.values(
+      template.findResources("AWS::IAM::Policy", attachedToRuntimeRole),
+    )
       .flatMap((policy) => policy.Properties.PolicyDocument.Statement)
-      .filter((s) => s.Effect === "Allow" && [s.Resource].flat().includes("*"))
-      .flatMap((s) => [s.Action].flat())
-      .sort();
-    expect(wildcardActions).toEqual(
+      .filter((s) => s.Effect === "Allow")
+      .flatMap((s) => [s.Action].flat());
+    expect([...new Set(actions)].sort()).toEqual(
       [
-        // 調査ツール用
+        // 調査ツール用（読み取り専用）
         "cloudwatch:DescribeAlarms",
         "cloudwatch:DescribeAlarmHistory",
         "cloudwatch:GetMetricStatistics",
@@ -100,10 +93,24 @@ describe("OpsAgentStack", () => {
         "logs:StartQuery",
         "logs:GetQueryResults",
         "logs:StopQuery",
-        // AgentCore Runtime の L2 construct が既定で付ける（イメージ取得・トレース送信・
-        // メトリクス送信。PutMetricData は bedrock-agentcore 名前空間に Condition で限定）
+        // モデル呼び出しと通知
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "sns:Publish",
+        // AgentCore Runtime の L2 construct が既定で付ける（イメージ取得・自身のログ出力・
+        // トレース・メトリクス・ワークロード ID。PutMetricData は bedrock-agentcore 名前空間に、
+        // ログ出力は自身のロググループに限定されている）
+        "bedrock-agentcore:GetWorkloadAccessToken",
+        "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
+        "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
         "cloudwatch:PutMetricData",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
         "ecr:GetAuthorizationToken",
+        "ecr:GetDownloadUrlForLayer",
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
         "xray:GetSamplingRules",
         "xray:GetSamplingTargets",
         "xray:PutTelemetryRecords",
@@ -112,8 +119,6 @@ describe("OpsAgentStack", () => {
     );
 
     const json = JSON.stringify(template.toJSON());
-    expect(json).toContain("bedrock:InvokeModel");
-    expect(json).toContain("sns:Publish");
     // 書き込み系の権限を付与していないこと
     expect(json).not.toContain("cloudwatch:PutMetricAlarm");
     expect(json).not.toContain("logs:DeleteLogGroup");
@@ -136,11 +141,9 @@ describe("OpsAgentStack", () => {
 
   test("中継 Lambda のロググループはスタック削除時に一緒に消える", () => {
     // 残ると関数名が決め打ちのため、作り直しのデプロイが AlreadyExists で失敗する
-    const [invokerId] = Object.keys(
-      template.findResources("AWS::Lambda::Function", {
-        Properties: { FunctionName: "TestStack-invoker" },
-      }),
-    );
+    const invokerId = template.getResourceId("AWS::Lambda::Function", {
+      Properties: { FunctionName: "TestStack-invoker" },
+    });
     template.resourceCountIs("AWS::Logs::LogGroup", 1);
     template.hasResource("AWS::Logs::LogGroup", {
       Properties: Match.objectLike({

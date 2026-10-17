@@ -141,9 +141,8 @@ export function createOpsAgentStack(
       AGENT_RUNTIME_ARN: runtime.agentRuntimeArn,
     },
   });
-  // ロググループは cdk.json の useCdkManagedLogGroup フラグで自動生成され、既定では RETAIN。
-  // 関数名を決め打ちにしているため、スタック削除後に残ると作り直しのデプロイが
-  // AlreadyExists で失敗する。論理 ID を変えないよう、自動生成のものに直接付ける
+  // useCdkManagedLogGroup フラグで自動生成されるロググループは既定で RETAIN のため、
+  // 論理 ID を保ったまま直接 DESTROY を付ける（DESIGN.md 決定 32）
   invoker.logGroup.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
   runtime.grantInvokeRuntime(invoker);
   // リトライによるエージェントの多重実行（重複通知）を防ぐ

@@ -439,7 +439,8 @@ Lambda の `Errors` は 0 件だった。決定 29 と決定 30 の役割分担�
 と名前がぶつかり `AlreadyExists` でロールバックした。cdk.json の `useCdkManagedLogGroup`
 フラグで自動生成されるロググループは既定で RETAIN のため、スタックを消しても残る。
 自動生成のロググループに `applyRemovalPolicy()` で `RemovalPolicy.DESTROY` を直接付けた
-（DESIGN.md 決定 32）。
+（DESIGN.md 決定 32）。修正前の版で削除したスタックのロググループは残ったままのため、
+手で削除する手順を README に載せた。
 
 ### 実装上の判断・つまずき
 
@@ -452,33 +453,18 @@ Lambda の `Errors` は 0 件だった。決定 29 と決定 30 の役割分担�
 - jest の `new cdk.App()` は cdk.json を読まないため、フラグが入らず自動生成のロググループが
   テンプレートに現れなかった。テストでは cdk.json の `context` を読んで App に渡し、本番の
   synth と揃えた
-- フラグを揃えると `minimizePolicies` で IAM のステートメントが統合・並べ替えされ、
-  ステートメントの形を固定していた既存の IAM テストが落ちた（本番には無い形を確かめていた）。
-  エージェントの実行ロールのポリシーに絞り、Resource に `"*"` を含むステートメント（Condition の
-  有無を問わない）のアクションの集合を完全一致で確かめる形に直した。期待値には調査ツール用の
-  10 個に加え、AgentCore Runtime の L2 construct が既定で付ける `ecr:GetAuthorizationToken`・
-  `xray:` の 4 個・`cloudwatch:PutMetricData`（`bedrock-agentcore` 名前空間に Condition で限定）
-  を含める。含まれるかだけを見る形や、Resource が文字列 `"*"` のものだけ・Condition なしの
-  ものだけを見る形では、書き込み系が足されても落ちない抜け道が残る。同じ理由で、ポリシーは
-  「Roles に実行ロールを含む」で絞り（他のロールと共有するポリシーも拾う）、集計に現れない
-  管理ポリシーは付いていないことを確かめる。管理ポリシーは付け方によって、ポリシー側の
-  `Roles`（自前の `ManagedPolicy`）か、ロール側の `ManagedPolicyArns`（AWS 管理ポリシー）に
-  出るため両方を見る
-- この修正が効くのは今の版でデプロイしたスタックだけで、修正前の版で削除したスタックの
-  ロググループは残ったまま。その場合は手で削除してからデプロイする旨を、削除コマンドと一緒に
-  README のデプロイの節（デプロイのコマンドより前）に書いた
-- 明示的に作る版（コミット `c5a409b`）を一度サンドボックスにデプロイしたため、そのスタックに
-  今の版を更新デプロイすると、逆向きに同じ名前の衝突が起きる。そのスタックは削除してから
-  デプロイし直す（ロググループは DESTROY なので一緒に消える）
+- フラグを揃えると `minimizePolicies` でステートメントが統合・並べ替えされ、形を固定していた
+  既存の IAM テストが落ちた（本番には無い形を確かめていた）。実行ロールに付くアクション全体の
+  集合を、L2 construct の既定分も含めて完全一致で確かめる形に直し、管理ポリシーが付いて
+  いないことも確かめる。Resource や Condition で絞り込むと、その外側から書き込み系を足す
+  抜け道が残る
 
 ### 検証結果
 
 - CDK: jest 18 件パス / tsc 成功
 - synth で、ロググループが 1 個だけ・論理 ID が変更前と同じ `InvokerFunctionLogGroupD01FAC38`・
   `DeletionPolicy` / `UpdateReplacePolicy` が `Delete` であることを確認
-- `applyRemovalPolicy()` の行を外すと、追加したテストが `DeletionPolicy: Retain` で落ちることを確認
-- 実行ロールに `logs:PutRetentionPolicy` を足すと、IAM のテストが落ちることを確認
-  （調査ツール用の `runtime.grant()` に足す・Resource を `["*", <ARN>]` の配列で足す・
-  Condition 付きで足す・中継 Lambda のロールと共有する `iam.Policy` で足す、の 4 通り）。
-  AWS 管理ポリシー（`CloudWatchFullAccess`）を付けた場合と、`roles` に実行ロールを指定した
-  自前の `ManagedPolicy` で足した場合も落ちることを確認
+- `applyRemovalPolicy()` の行を外すと、ロググループのテストが `DeletionPolicy: Retain` で落ちることを確認
+- 実行ロールに書き込み系の権限を足すと IAM のテストが落ちることを、付け方を変えて確認した
+  （`runtime.grant()`・ARN を限定した grant・Condition 付き・他のロールと共有する `iam.Policy`・
+  自前の `ManagedPolicy`・AWS 管理ポリシー）
