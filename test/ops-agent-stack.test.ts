@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
 import * as cdk from "aws-cdk-lib/core";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { parameters } from "../parameter.sample";
@@ -6,8 +8,14 @@ import {
   type OpsAgentParameters,
 } from "../stacks/ops-agent-stack";
 
+// new cdk.App() は cdk.json を読まないため、feature flag を渡して本番の synth と揃える
+// （中継 Lambda のロググループのように、フラグで生成されるリソースがあるため）
+const { context } = JSON.parse(
+  readFileSync(path.join(__dirname, "..", "cdk.json"), "utf-8"),
+);
+
 function synth(overrides: Partial<OpsAgentParameters> = {}): Template {
-  const app = new cdk.App();
+  const app = new cdk.App({ context });
   const stack = createOpsAgentStack(app, "TestStack", {
     parameters: { ...parameters, ...overrides },
   });
@@ -40,29 +48,29 @@ describe("OpsAgentStack", () => {
   });
 
   test("Runtime の実行ロールに CloudWatch 読み取りの最小権限が付与される", () => {
-    // 調査ツール用のステートメントが読み取り専用アクションだけで構成されていること
-    template.hasResourceProperties("AWS::IAM::Policy", {
-      PolicyDocument: Match.objectLike({
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: [
-              "cloudwatch:DescribeAlarms",
-              "cloudwatch:DescribeAlarmHistory",
-              "cloudwatch:GetMetricStatistics",
-              "cloudwatch:ListMetrics",
-              "logs:DescribeLogGroups",
-              "logs:DescribeLogStreams",
-              "logs:FilterLogEvents",
-              "logs:StartQuery",
-              "logs:GetQueryResults",
-              "logs:StopQuery",
-            ],
-            Effect: "Allow",
-            Resource: "*",
-          }),
-        ]),
-      }),
-    });
+    // 調査ツール用の読み取りアクションが Resource "*" で付与されていること。
+    // minimizePolicies フラグで同じ Resource のステートメントは統合・並べ替えされるため、
+    // ステートメントの形ではなく含まれるアクションで確かめる
+    const wildcardActions = Object.values(
+      template.findResources("AWS::IAM::Policy"),
+    )
+      .flatMap((policy) => policy.Properties.PolicyDocument.Statement)
+      .filter((s) => s.Effect === "Allow" && s.Resource === "*" && !s.Condition)
+      .flatMap((s) => [s.Action].flat());
+    expect(wildcardActions).toEqual(
+      expect.arrayContaining([
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:DescribeAlarmHistory",
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:ListMetrics",
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "logs:FilterLogEvents",
+        "logs:StartQuery",
+        "logs:GetQueryResults",
+        "logs:StopQuery",
+      ]),
+    );
 
     const json = JSON.stringify(template.toJSON());
     expect(json).toContain("bedrock:InvokeModel");
@@ -89,10 +97,17 @@ describe("OpsAgentStack", () => {
 
   test("中継 Lambda のロググループはスタック削除時に一緒に消える", () => {
     // 残ると関数名が決め打ちのため、作り直しのデプロイが AlreadyExists で失敗する
+    const [invokerId] = Object.keys(
+      template.findResources("AWS::Lambda::Function", {
+        Properties: { FunctionName: "TestStack-invoker" },
+      }),
+    );
     template.resourceCountIs("AWS::Logs::LogGroup", 1);
     template.hasResource("AWS::Logs::LogGroup", {
       Properties: Match.objectLike({
-        LogGroupName: "/aws/lambda/TestStack-invoker",
+        LogGroupName: {
+          "Fn::Join": ["", ["/aws/lambda/", { Ref: invokerId }]],
+        },
       }),
       DeletionPolicy: "Delete",
       UpdateReplacePolicy: "Delete",
