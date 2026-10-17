@@ -48,17 +48,24 @@ describe("OpsAgentStack", () => {
   });
 
   test("Runtime の実行ロールに CloudWatch 読み取りの最小権限が付与される", () => {
-    // 調査ツール用の読み取りアクションが Resource "*" で付与されていること。
+    // 実行ロールに Resource "*" で付くアクションが、調査ツール用の読み取りアクションと
+    // L2 construct が既定で付けるものだけであること（書き込み系が足されたら落ちる）。
     // minimizePolicies フラグで同じ Resource のステートメントは統合・並べ替えされるため、
-    // ステートメントの形ではなく含まれるアクションで確かめる
-    const wildcardActions = Object.values(
-      template.findResources("AWS::IAM::Policy"),
-    )
+    // ステートメントの形ではなくアクションの集合で確かめる
+    const runtimePolicies = template.findResources("AWS::IAM::Policy", {
+      Properties: {
+        Roles: [{ Ref: Match.stringLikeRegexp("^AgentRuntimeExecutionRole") }],
+      },
+    });
+    expect(Object.keys(runtimePolicies)).toHaveLength(1);
+    const wildcardActions = Object.values(runtimePolicies)
       .flatMap((policy) => policy.Properties.PolicyDocument.Statement)
       .filter((s) => s.Effect === "Allow" && s.Resource === "*" && !s.Condition)
-      .flatMap((s) => [s.Action].flat());
+      .flatMap((s) => [s.Action].flat())
+      .sort();
     expect(wildcardActions).toEqual(
-      expect.arrayContaining([
+      [
+        // 調査ツール用
         "cloudwatch:DescribeAlarms",
         "cloudwatch:DescribeAlarmHistory",
         "cloudwatch:GetMetricStatistics",
@@ -69,7 +76,13 @@ describe("OpsAgentStack", () => {
         "logs:StartQuery",
         "logs:GetQueryResults",
         "logs:StopQuery",
-      ]),
+        // AgentCore Runtime の L2 construct が既定で付ける（イメージ取得とトレース送信）
+        "ecr:GetAuthorizationToken",
+        "xray:GetSamplingRules",
+        "xray:GetSamplingTargets",
+        "xray:PutTelemetryRecords",
+        "xray:PutTraceSegments",
+      ].sort(),
     );
 
     const json = JSON.stringify(template.toJSON());

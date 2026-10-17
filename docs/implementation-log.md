@@ -453,7 +453,10 @@ Lambda の `Errors` は 0 件だった。決定 29 と決定 30 の役割分担�
   synth と揃えた
 - フラグを揃えると `minimizePolicies` で IAM のステートメントが統合・並べ替えされ、
   ステートメントの形を固定していた既存の IAM テストが落ちた（本番には無い形を確かめていた）。
-  `Resource: "*"` のステートメントに読み取りアクションが含まれるかで確かめる形に直した
+  エージェントの実行ロールのポリシーに絞り、`Resource: "*"`（Condition なし）で付くアクションの
+  集合を完全一致で確かめる形に直した。期待値には調査ツール用の 10 個に加え、AgentCore Runtime の
+  L2 construct が既定で付ける `ecr:GetAuthorizationToken` と `xray:` の 4 個を含める。
+  含まれるかだけを見る形にすると、書き込み系が足されても落ちなくなる
 - 明示的に作る版（コミット `c5a409b`）を一度サンドボックスにデプロイしたため、そのスタックに
   今の版を更新デプロイすると、逆向きに同じ名前の衝突が起きる。そのスタックは削除してから
   デプロイし直す（ロググループは DESTROY なので一緒に消える）
@@ -464,3 +467,4 @@ Lambda の `Errors` は 0 件だった。決定 29 と決定 30 の役割分担�
 - synth で、ロググループが 1 個だけ・論理 ID が変更前と同じ `InvokerFunctionLogGroupD01FAC38`・
   `DeletionPolicy` / `UpdateReplacePolicy` が `Delete` であることを確認
 - `applyRemovalPolicy()` の行を外すと、追加したテストが `DeletionPolicy: Retain` で落ちることを確認
+- 調査ツール用の `runtime.grant()` に `logs:PutRetentionPolicy` を足すと、IAM のテストが落ちることを確認
