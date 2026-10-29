@@ -326,6 +326,14 @@ def test_build_agentはプロンプトキャッシュを自動戦略で有効に
     assert cache_config.strategy == "auto"
 
 
+def test_build_agentは応答の最大トークン数を明示する() -> None:
+    agent = agent_module.build_agent(CONFIG, boto_session=FakeBotoSession())
+
+    # 未指定だとモデルごとの Bedrock 既定値（Haiku 5.5 では 4096）で応答が打ち切られ、
+    # 調査ループが MaxTokensReachedException で落ちる
+    assert agent.model.get_config().get("max_tokens") == 16384
+
+
 def test_エージェントの組み立てに失敗した場合も依頼者に通知される(monkeypatch: Any) -> None:
     def failing_build_agent(config: Config) -> Any:
         raise RuntimeError("ValidationException: model not found")

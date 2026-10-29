@@ -43,6 +43,12 @@ logger = logging.getLogger(__name__)
 # 調査方針・採点基準・レポート書式を Strands の Skills 機能で渡す（配下のスキルをすべて読み込む）
 SKILLS_DIR = Path(__file__).parent / "skills"
 
+# 1 回の応答で生成できる最大トークン数。未指定だとモデルごとの Bedrock 既定値に任され、
+# Haiku 5.5 では 4096 で打ち切られて調査ループが MaxTokensReachedException で落ちた
+# （実測では日次チェックでも 3903 に達していた）。課金は実際の生成量だけだが、TPM クォータは
+# 呼び出し開始時にこの値の分を先に確保するため、際限なく大きくはしない
+MAX_TOKENS = 16384
+
 # 構造化出力はモデルが期待どおりの応答を返さず失敗することがあるため、間を空けて再試行する。
 # 間を空けずに連打しても同じ結果になりやすく、スロットリングにも効かない
 RETRY_BACKOFF_SECONDS = (4, 16)
@@ -79,6 +85,7 @@ def build_agent(config: Config, *, boto_session: Any = None) -> Agent:
     return Agent(
         model=BedrockModel(
             model_id=config.model_id,
+            max_tokens=MAX_TOKENS,
             # 調査ループはツール往復のたびに同じプレフィックス（システムプロンプト・
             # ツール定義・会話履歴）を再送するため、プロンプトキャッシュで再利用する。
             # 呼び出しは日次ゆえキャッシュの TTL（最長 1 時間）を跨いだ再利用は成立せず、
