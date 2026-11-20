@@ -3,6 +3,7 @@ name = "ops-agent"
 version = "0.1.0"
 description = "過去24時間の CloudWatch を自律調査して Slack に通知する運用エージェント"
 readme = "README.md"
+license = "MIT-0"
 requires-python = ">=3.14"
 dependencies = [
     "bedrock-agentcore>=1.21.0",
